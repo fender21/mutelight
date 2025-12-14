@@ -1,0 +1,38 @@
+appId: com.mutelight.app
+productName: MuteLight
+directories:
+  output: release
+  buildResources: assets
+files:
+  - dist-main/**/*
+  - dist-preload/**/*
+  - dist-renderer/**/*
+  - package.json
+asarUnpack:
+  - node_modules/@xhayper/discord-rpc/**/*
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: assets/icons/icon.ico
+  artifactName: ${productName}-${version}-${arch}-${os}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+mac:
+  target:
+    - dmg
+  icon: assets/icons/icon.icns
+  category: public.app-category.utilities
+linux:
+  target:
+    - AppImage
+  icon: assets/icons/icon.png
+  category: Utility
+  synopsis: Discord mute status LED controller
