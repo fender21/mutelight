@@ -2,7 +2,6 @@ appId: com.mutelight.app
 productName: MuteLight
 directories:
   output: release
-  buildResources: assets
 files:
   - dist-main/**/*
   - dist-preload/**/*
@@ -18,13 +17,15 @@ win:
     - target: portable
       arch:
         - x64
-  icon: assets/icons/icon.ico
-  artifactName: ${productName}-${version}-${arch}-${os}.${ext}
+  signAndEditExecutable: false
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
+  artifactName: ${productName}-${version}-Setup.${ext}
+portable:
+  artifactName: ${productName}-${version}-Portable.${ext}
 mac:
   target:
     - dmg
