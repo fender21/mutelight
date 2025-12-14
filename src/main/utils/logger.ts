@@ -5,7 +5,7 @@ import { app } from 'electron';
 const logDir = app.getPath('logs');
 
 export const logger = winston.createLogger({
-  level: process.env.NODE_ENV === 'development' ? 'debug' : 'info',
+  level: !app.isPackaged ? 'debug' : 'info',
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),
@@ -30,7 +30,7 @@ export const logger = winston.createLogger({
 });
 
 // Console logging in development
-if (process.env.NODE_ENV === 'development') {
+if (!app.isPackaged) {
   logger.add(
     new winston.transports.Console({
       format: winston.format.combine(

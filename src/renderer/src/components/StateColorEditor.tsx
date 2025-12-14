@@ -16,7 +16,7 @@ interface StateColorEditorProps {
 const STATE_INFO: Record<VoiceState, { label: string; icon: string; unavailable?: boolean }> = {
   idle: { label: 'Idle', icon: '💤' },
   connected: { label: 'Connected', icon: '🎧' },
-  speaking: { label: 'Speaking', icon: '🗣️', unavailable: true },
+  speaking: { label: 'Speaking', icon: '🗣️' },
   muted: { label: 'Muted', icon: '🔇' },
   deafened: { label: 'Deafened', icon: '🔕' },
   streaming: { label: 'Streaming', icon: '📺' },

@@ -27,7 +27,7 @@ function createWindow(): void {
   });
 
   // Load app
-  if (process.env.NODE_ENV === 'development') {
+  if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {

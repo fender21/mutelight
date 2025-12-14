@@ -13,9 +13,9 @@ export const DEFAULT_STATE_COLORS: StateColors = {
     enabled: true,
   },
   speaking: {
-    color: '#06b6d4',  // Cyan - actively talking (not available via Discord RPC)
+    color: '#06b6d4',  // Cyan - actively talking
     brightness: 255,
-    enabled: false,    // Disabled: Discord RPC doesn't expose self-speaking state
+    enabled: true,
   },
   muted: {
     color: '#ef4444',  // Red - muted
