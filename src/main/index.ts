@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
 import { configService } from './services/config.service';
 import { discordService } from './services/discord.service';
+import { wledService } from './services/wled.service';
 import { trayService } from './services/tray.service';
 import { registerIpcHandlers, setupDiscordForwarding } from './ipc/handlers';
 import { logger } from './utils/logger';
@@ -91,6 +92,17 @@ app.whenReady().then(async () => {
     trayService.updateDiscordState(true);
   }
 
+  // Capture initial WLED states for all configured devices (for restore on quit)
+  const devices = configService.getDevices();
+  for (const device of devices) {
+    try {
+      await wledService.captureDeviceState(device.id, device.ip_address);
+      logger.info(`Captured initial state for device: ${device.name}`);
+    } catch (error) {
+      logger.warn(`Failed to capture state for ${device.name}:`, error);
+    }
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
@@ -104,8 +116,22 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   (app as any).isQuitting = true;
+
+  // Restore WLED devices to original state
+  const devices = configService.getDevices();
+  for (const device of devices) {
+    try {
+      const restored = await wledService.restoreToOriginalState(device.id);
+      if (restored) {
+        logger.info(`Restored original state for device: ${device.name}`);
+      }
+    } catch (error) {
+      logger.warn(`Failed to restore state for ${device.name}:`, error);
+    }
+  }
+
   discordService.disconnect();
   trayService.destroy();
 });

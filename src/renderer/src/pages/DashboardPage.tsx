@@ -9,14 +9,12 @@ import { MuteStateVisual } from '../components/MuteStateVisual';
 export function DashboardPage() {
   const {
     devices,
-    zones,
     discordState,
     setDevices,
-    setZones,
     updateDiscordState,
   } = useAppStore();
 
-  const { getDevices, getZones, getDiscordStatus } = useIPC();
+  const { getDevices, getDiscordStatus } = useIPC();
 
   // Load initial data
   useEffect(() => {
@@ -28,13 +26,8 @@ export function DashboardPage() {
   }, []);
 
   const loadData = async () => {
-    const [devicesData, zonesData] = await Promise.all([
-      getDevices(),
-      getZones(),
-    ]);
-
+    const devicesData = await getDevices();
     setDevices(devicesData);
-    setZones(zonesData);
   };
 
   return (
@@ -90,16 +83,12 @@ export function DashboardPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {devices.map((device) => {
-                const deviceZones = zones.filter(z => z.device_id === device.id);
-                return (
-                  <DeviceCard
-                    key={device.id}
-                    device={device}
-                    zones={deviceZones}
-                  />
-                );
-              })}
+              {devices.map((device) => (
+                <DeviceCard
+                  key={device.id}
+                  device={device}
+                />
+              ))}
             </div>
           )}
         </div>

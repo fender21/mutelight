@@ -1,11 +1,33 @@
 // Voice state enum (priority order - highest priority wins)
-export type VoiceState = 'idle' | 'connected' | 'unmuted' | 'speaking' | 'muted' | 'deafened' | 'streaming';
+export type VoiceState = 'idle' | 'connected' | 'speaking' | 'muted' | 'deafened' | 'streaming';
+
+// WLED effect from device
+export interface WledEffect {
+  id: number;
+  name: string;
+}
+
+// Effect configuration for a state
+export interface EffectConfig {
+  effectId: number;   // 0 = Solid
+  speed: number;      // 0-255 (sx)
+  intensity: number;  // 0-255 (ix)
+}
+
+// Captured WLED device state (for restore on shutdown)
+export interface CapturedWledState {
+  deviceId: string;
+  ip_address: string;
+  capturedAt: number;
+  state: any;  // Full WLED state object from /json/state
+}
 
 // Per-state light configuration
 export interface StateLightConfig {
   color: string;       // Hex color (e.g., '#FF0000')
   brightness: number;  // 0-255
   enabled: boolean;    // Whether to trigger lights for this state
+  effect?: EffectConfig;  // Optional effect configuration
 }
 
 // All state configurations
@@ -34,22 +56,6 @@ export interface WledDevice {
   created_at?: number;
 }
 
-export interface LightZone {
-  id: string;
-  device_id: string;
-  name: string;
-  start_led: number;
-  end_led: number;
-  // Legacy colors (backward compatibility)
-  muted_color: string;
-  unmuted_color: string;
-  // Zone-specific overrides (optional, inherits from device if not set)
-  stateColors?: Partial<StateColors>;
-  brightness?: number;       // Zone brightness override
-  transitionTime?: number;   // Zone transition override
-  created_at?: number;
-}
-
 // mDNS discovery types
 export interface MdnsDevice {
   name: string;
@@ -61,7 +67,6 @@ export interface MdnsDevice {
 // Application state types
 export interface AppConfig {
   devices: WledDevice[];
-  zones: LightZone[];
   lastSync: number | null;
 }
 
@@ -98,12 +103,10 @@ export type IpcChannels =
   | 'devices:test-connection'
   | 'devices:preview-color'
   | 'devices:restore-state'
-  | 'zones:create'
-  | 'zones:update'
-  | 'zones:delete'
-  | 'zones:preview-color'
+  | 'devices:get-effects'
+  | 'devices:capture-state'
+  | 'devices:restore-original'
   | 'config:get-devices'
-  | 'config:get-zones'
   | 'settings:get'
   | 'settings:update'
   | 'discord:get-status'

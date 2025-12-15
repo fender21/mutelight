@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 
-import type { WledDevice, LightZone, MdnsDevice, VoiceState, DiscordState } from '@shared/types';
+import type { WledDevice, MdnsDevice, VoiceState, DiscordState, EffectConfig, WledEffect, CapturedWledState } from '@shared/types';
 
 // Define the exposed API interface
 export interface ElectronAPI {
@@ -18,24 +18,21 @@ export interface ElectronAPI {
     Promise<{ success: boolean; online: boolean; error?: string }>;
 
   // Preview and restore
-  previewDeviceColor: (deviceId: string, color: string, brightness: number) =>
-    Promise<{ success: boolean; error?: string }>;
-  previewZoneColor: (zoneId: string, color: string, brightness: number) =>
+  previewDeviceColor: (deviceId: string, color: string, brightness: number, effect?: EffectConfig) =>
     Promise<{ success: boolean; error?: string }>;
   restoreDeviceState: (deviceId: string) =>
     Promise<{ success: boolean; error?: string }>;
 
-  // Zone CRUD
-  createZone: (zone: Omit<LightZone, 'id' | 'created_at'>) =>
-    Promise<{ success: boolean; zone?: LightZone; error?: string }>;
-  updateZone: (id: string, updates: Partial<LightZone>) =>
-    Promise<{ success: boolean; zone?: LightZone; error?: string }>;
-  deleteZone: (id: string) =>
+  // Effects and state capture
+  getDeviceEffects: (deviceId: string) =>
+    Promise<{ success: boolean; effects: WledEffect[]; error?: string }>;
+  captureDeviceState: (deviceId: string) =>
+    Promise<{ success: boolean; state?: CapturedWledState; error?: string }>;
+  restoreToOriginalState: (deviceId: string) =>
     Promise<{ success: boolean; error?: string }>;
 
   // Configuration
   getDevices: () => Promise<WledDevice[]>;
-  getZones: () => Promise<LightZone[]>;
 
   // Settings
   getSettings: () => Promise<any>;
@@ -75,31 +72,25 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('devices:test-connection', ipAddress),
 
   // Preview and restore
-  previewDeviceColor: (deviceId, color, brightness) =>
-    ipcRenderer.invoke('devices:preview-color', deviceId, color, brightness),
-
-  previewZoneColor: (zoneId, color, brightness) =>
-    ipcRenderer.invoke('zones:preview-color', zoneId, color, brightness),
+  previewDeviceColor: (deviceId, color, brightness, effect?) =>
+    ipcRenderer.invoke('devices:preview-color', deviceId, color, brightness, effect),
 
   restoreDeviceState: (deviceId) =>
     ipcRenderer.invoke('devices:restore-state', deviceId),
 
-  // Zone CRUD
-  createZone: (zone) =>
-    ipcRenderer.invoke('zones:create', zone),
+  // Effects and state capture
+  getDeviceEffects: (deviceId) =>
+    ipcRenderer.invoke('devices:get-effects', deviceId),
 
-  updateZone: (id, updates) =>
-    ipcRenderer.invoke('zones:update', id, updates),
+  captureDeviceState: (deviceId) =>
+    ipcRenderer.invoke('devices:capture-state', deviceId),
 
-  deleteZone: (id) =>
-    ipcRenderer.invoke('zones:delete', id),
+  restoreToOriginalState: (deviceId) =>
+    ipcRenderer.invoke('devices:restore-original', deviceId),
 
   // Configuration
   getDevices: () =>
     ipcRenderer.invoke('config:get-devices'),
-
-  getZones: () =>
-    ipcRenderer.invoke('config:get-zones'),
 
   getSettings: () =>
     ipcRenderer.invoke('settings:get'),

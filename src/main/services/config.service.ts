@@ -1,6 +1,6 @@
 import Store from 'electron-store';
 import { randomUUID } from 'crypto';
-import type { AppConfig, AppSettings, WledDevice, LightZone } from '@shared/types';
+import type { AppConfig, AppSettings, WledDevice } from '@shared/types';
 import { DEFAULT_SETTINGS } from '@shared/constants';
 
 interface StoreSchema {
@@ -16,7 +16,6 @@ class ConfigService {
       defaults: {
         config: {
           devices: [],
-          zones: [],
           lastSync: null,
         },
         settings: DEFAULT_SETTINGS,
@@ -26,7 +25,6 @@ class ConfigService {
           type: 'object',
           properties: {
             devices: { type: 'array' },
-            zones: { type: 'array' },
             lastSync: { type: ['number', 'null'] },
           },
         },
@@ -63,22 +61,14 @@ class ConfigService {
     this.store.set('settings', { ...current, ...settings });
   }
 
-  // Device/Zone management
+  // Device management
   updateDevices(devices: WledDevice[]): void {
     this.store.set('config.devices', devices);
     this.store.set('config.lastSync', Date.now());
   }
 
-  updateZones(zones: LightZone[]): void {
-    this.store.set('config.zones', zones);
-  }
-
   getDevices(): WledDevice[] {
     return this.store.get('config.devices');
-  }
-
-  getZones(): LightZone[] {
-    return this.store.get('config.zones');
   }
 
   // Device CRUD operations
@@ -116,50 +106,9 @@ class ConfigService {
 
     if (filtered.length === devices.length) return false;
 
-    // Also delete associated zones
-    const zones = this.getZones().filter(z => z.device_id !== id);
-
     this.store.set('config.devices', filtered);
-    this.store.set('config.zones', zones);
     this.store.set('config.lastSync', Date.now());
 
-    return true;
-  }
-
-  // Zone CRUD operations
-  createZone(zone: Omit<LightZone, 'id' | 'created_at'>): LightZone {
-    const newZone: LightZone = {
-      ...zone,
-      id: randomUUID(),
-      created_at: Date.now(),
-    };
-
-    const zones = this.getZones();
-    zones.push(newZone);
-    this.store.set('config.zones', zones);
-
-    return newZone;
-  }
-
-  updateZone(id: string, updates: Partial<LightZone>): LightZone | null {
-    const zones = this.getZones();
-    const index = zones.findIndex(z => z.id === id);
-
-    if (index === -1) return null;
-
-    zones[index] = { ...zones[index], ...updates };
-    this.store.set('config.zones', zones);
-
-    return zones[index];
-  }
-
-  deleteZone(id: string): boolean {
-    const zones = this.getZones();
-    const filtered = zones.filter(z => z.id !== id);
-
-    if (filtered.length === zones.length) return false;
-
-    this.store.set('config.zones', filtered);
     return true;
   }
 

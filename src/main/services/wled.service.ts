@@ -1,6 +1,6 @@
 import { WLED_TIMEOUT, WLED_RETRY_ATTEMPTS, WLED_RETRY_DELAY } from '@shared/constants';
-import type { WledDevice, LightZone, VoiceState } from '@shared/types';
-import { getStateLightConfig, getTransitionTime, DEFAULT_BRIGHTNESS } from '@shared/defaults';
+import type { WledDevice, VoiceState, EffectConfig, WledEffect, CapturedWledState } from '@shared/types';
+import { getStateLightConfig, getTransitionTime, DEFAULT_BRIGHTNESS, DEFAULT_EFFECT_CONFIG } from '@shared/defaults';
 import { logger } from '../utils/logger';
 
 interface WledStatePayload {
@@ -12,6 +12,7 @@ interface WledStatePayload {
 
 class WledService {
   private deviceStatusMap = new Map<string, { online: boolean; lastSeen: number }>();
+  private capturedStates = new Map<string, CapturedWledState>();
 
   /**
    * Converts hex color to RGB array
@@ -70,18 +71,26 @@ class WledService {
    * @param hexColor - Hex color (e.g., '#FF0000')
    * @param brightness - Brightness 0-255 (default 255)
    * @param transitionMs - Transition time in milliseconds (default 0)
+   * @param effect - Optional effect configuration (defaults to Solid)
    */
   async setDeviceColor(
     ipAddress: string,
     hexColor: string,
     brightness: number = DEFAULT_BRIGHTNESS,
-    transitionMs: number = 0
+    transitionMs: number = 0,
+    effect?: EffectConfig
   ): Promise<boolean> {
     const rgb = this.hexToRgb(hexColor);
+    const effectConfig = effect ?? DEFAULT_EFFECT_CONFIG;
     const payload: WledStatePayload = {
       on: true,
       bri: Math.max(0, Math.min(255, brightness)),
-      seg: [{ col: [rgb] }],
+      seg: [{
+        col: [rgb],
+        fx: effectConfig.effectId,
+        sx: effectConfig.speed,
+        ix: effectConfig.intensity,
+      }],
     };
 
     // Add transition if specified (WLED uses deciseconds)
@@ -89,44 +98,7 @@ class WledService {
       payload.transition = Math.round(transitionMs / 100);
     }
 
-    logger.debug(`Setting device color: ${ipAddress} -> ${hexColor} (bri: ${brightness}, trans: ${transitionMs}ms)`);
-    return this.sendToWled(ipAddress, payload);
-  }
-
-  /**
-   * Sets color for specific LED zone
-   * @param ipAddress - Device IP address
-   * @param startLed - Start LED index
-   * @param endLed - End LED index
-   * @param hexColor - Hex color (e.g., '#FF0000')
-   * @param brightness - Brightness 0-255 (default 255)
-   * @param transitionMs - Transition time in milliseconds (default 0)
-   */
-  async setZoneColor(
-    ipAddress: string,
-    startLed: number,
-    endLed: number,
-    hexColor: string,
-    brightness: number = DEFAULT_BRIGHTNESS,
-    transitionMs: number = 0
-  ): Promise<boolean> {
-    const rgb = this.hexToRgb(hexColor);
-
-    // WLED segment API: { i: [start, [r,g,b], end] }
-    const payload: WledStatePayload = {
-      on: true,
-      bri: Math.max(0, Math.min(255, brightness)),
-      seg: {
-        i: [startLed, rgb, endLed],
-      } as any,
-    };
-
-    // Add transition if specified (WLED uses deciseconds)
-    if (transitionMs > 0) {
-      payload.transition = Math.round(transitionMs / 100);
-    }
-
-    logger.debug(`Setting zone color: ${ipAddress} [${startLed}-${endLed}] -> ${hexColor} (bri: ${brightness}, trans: ${transitionMs}ms)`);
+    logger.debug(`Setting device color: ${ipAddress} -> ${hexColor} (bri: ${brightness}, fx: ${effectConfig.effectId}, trans: ${transitionMs}ms)`);
     return this.sendToWled(ipAddress, payload);
   }
 
@@ -136,56 +108,27 @@ class WledService {
    */
   async updateAllDevices(
     effectiveState: VoiceState,
-    devices: WledDevice[],
-    zones: LightZone[]
+    devices: WledDevice[]
   ): Promise<void> {
     logger.info(`Updating all devices - State: ${effectiveState}`);
 
     const updatePromises = devices.map(async device => {
-      const deviceZones = zones.filter(z => z.device_id === device.id);
-      const deviceTransition = getTransitionTime(undefined, device);
+      const config = getStateLightConfig(effectiveState, device);
+      const deviceTransition = getTransitionTime(device);
 
-      if (deviceZones.length > 0) {
-        // Device has zones - update each zone individually
-        const zonePromises = deviceZones.map(zone => {
-          const config = getStateLightConfig(effectiveState, device, zone);
-
-          // Skip if this state is disabled for the zone
-          if (!config.enabled) {
-            logger.debug(`Zone ${zone.name} skipped - state ${effectiveState} disabled`);
-            return Promise.resolve(true);
-          }
-
-          const transition = getTransitionTime(zone, device);
-
-          return this.setZoneColor(
-            device.ip_address,
-            zone.start_led,
-            zone.end_led,
-            config.color,
-            config.brightness,
-            transition
-          );
-        });
-
-        await Promise.allSettled(zonePromises);
-      } else {
-        // No zones - update entire device
-        const config = getStateLightConfig(effectiveState, device);
-
-        // Skip if this state is disabled
-        if (!config.enabled) {
-          logger.debug(`Device ${device.name} skipped - state ${effectiveState} disabled`);
-          return;
-        }
-
-        await this.setDeviceColor(
-          device.ip_address,
-          config.color,
-          config.brightness,
-          deviceTransition
-        );
+      // Skip if this state is disabled
+      if (!config.enabled) {
+        logger.debug(`Device ${device.name} skipped - state ${effectiveState} disabled`);
+        return;
       }
+
+      await this.setDeviceColor(
+        device.ip_address,
+        config.color,
+        config.brightness,
+        deviceTransition,
+        config.effect
+      );
     });
 
     await Promise.allSettled(updatePromises);
@@ -197,11 +140,10 @@ class WledService {
    */
   async updateAllDevicesByMuteState(
     isMuted: boolean,
-    devices: WledDevice[],
-    zones: LightZone[]
+    devices: WledDevice[]
   ): Promise<void> {
     const effectiveState: VoiceState = isMuted ? 'muted' : 'connected';
-    return this.updateAllDevices(effectiveState, devices, zones);
+    return this.updateAllDevices(effectiveState, devices);
   }
 
   /**
@@ -217,29 +159,14 @@ class WledService {
   }
 
   /**
-   * Preview a color on a specific zone (for testing)
-   */
-  async previewZoneColor(
-    ipAddress: string,
-    startLed: number,
-    endLed: number,
-    hexColor: string,
-    brightness: number = DEFAULT_BRIGHTNESS
-  ): Promise<boolean> {
-    logger.info(`Previewing zone color: ${ipAddress} [${startLed}-${endLed}] -> ${hexColor}`);
-    return this.setZoneColor(ipAddress, startLed, endLed, hexColor, brightness, 0);
-  }
-
-  /**
    * Restore device to current Discord state
    */
   async restoreDeviceFromState(
     effectiveState: VoiceState,
-    device: WledDevice,
-    zones: LightZone[]
+    device: WledDevice
   ): Promise<void> {
     logger.info(`Restoring device ${device.name} to state: ${effectiveState}`);
-    await this.updateAllDevices(effectiveState, [device], zones);
+    await this.updateAllDevices(effectiveState, [device]);
   }
 
   /**
@@ -280,6 +207,143 @@ class WledService {
    */
   getDeviceStatuses(): Map<string, { online: boolean; lastSeen: number }> {
     return new Map(this.deviceStatusMap);
+  }
+
+  /**
+   * Fetches device info including effects list and current state
+   * GET /json returns full device info with effects array
+   */
+  async getDeviceInfo(ipAddress: string): Promise<{
+    effects: WledEffect[];
+    currentState: any;
+  } | null> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), WLED_TIMEOUT);
+
+      const response = await fetch(`http://${ipAddress}/json`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Parse effects array - WLED returns array of effect names indexed by ID
+      const effectNames: string[] = data.effects || [];
+      const effects: WledEffect[] = effectNames
+        .map((name: string, index: number) => ({
+          id: index,
+          name: name,
+        }))
+        // Filter out reserved/unsupported effects
+        .filter((e: WledEffect) => e.name && e.name !== 'RSVD' && e.name !== '-');
+
+      this.updateDeviceStatus(ipAddress, true);
+
+      return {
+        effects,
+        currentState: data.state,
+      };
+    } catch (error: any) {
+      logger.error(`Failed to get device info for ${ipAddress}:`, error.message);
+      this.updateDeviceStatus(ipAddress, false);
+      return null;
+    }
+  }
+
+  /**
+   * Captures current state from device for later restoration
+   */
+  async captureDeviceState(deviceId: string, ipAddress: string): Promise<CapturedWledState | null> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), WLED_TIMEOUT);
+
+      const response = await fetch(`http://${ipAddress}/json/state`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const state = await response.json();
+
+      const captured: CapturedWledState = {
+        deviceId,
+        ip_address: ipAddress,
+        capturedAt: Date.now(),
+        state,
+      };
+
+      this.capturedStates.set(deviceId, captured);
+      this.updateDeviceStatus(ipAddress, true);
+
+      logger.info(`Captured state for device ${deviceId} at ${ipAddress}`);
+      return captured;
+    } catch (error: any) {
+      logger.error(`Failed to capture state for ${ipAddress}:`, error.message);
+      this.updateDeviceStatus(ipAddress, false);
+      return null;
+    }
+  }
+
+  /**
+   * Restores device to previously captured state
+   */
+  async restoreToOriginalState(deviceId: string): Promise<boolean> {
+    const captured = this.capturedStates.get(deviceId);
+    if (!captured) {
+      logger.warn(`No captured state found for device ${deviceId}`);
+      return false;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), WLED_TIMEOUT);
+
+      const response = await fetch(`http://${captured.ip_address}/json/state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(captured.state),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      logger.info(`Restored original state for device ${deviceId}`);
+      this.updateDeviceStatus(captured.ip_address, true);
+      return true;
+    } catch (error: any) {
+      logger.error(`Failed to restore state for ${deviceId}:`, error.message);
+      this.updateDeviceStatus(captured.ip_address, false);
+      return false;
+    }
+  }
+
+  /**
+   * Gets all captured states
+   */
+  getCapturedStates(): Map<string, CapturedWledState> {
+    return new Map(this.capturedStates);
+  }
+
+  /**
+   * Clears captured state for a device
+   */
+  clearCapturedState(deviceId: string): void {
+    this.capturedStates.delete(deviceId);
   }
 }
 

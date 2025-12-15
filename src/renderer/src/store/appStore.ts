@@ -1,10 +1,9 @@
 import { create } from 'zustand';
-import type { WledDevice, LightZone, AppSettings, DiscordState, DeviceStatus } from '@shared/types';
+import type { WledDevice, AppSettings, DiscordState, DeviceStatus } from '@shared/types';
 
 interface AppState {
   // Configuration
   devices: WledDevice[];
-  zones: LightZone[];
   isSyncing: boolean;
   lastSync: Date | null;
 
@@ -19,7 +18,6 @@ interface AppState {
 
   // Actions
   setDevices: (devices: WledDevice[]) => void;
-  setZones: (zones: LightZone[]) => void;
   setSyncing: (syncing: boolean) => void;
   setSettings: (settings: AppSettings) => void;
   updateDiscordState: (state: Partial<DiscordState>) => void;
@@ -29,7 +27,6 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   // Initial state
   devices: [],
-  zones: [],
   isSyncing: false,
   lastSync: null,
   settings: null,
@@ -46,8 +43,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   // Actions
   setDevices: (devices) => set({ devices, lastSync: new Date() }),
-
-  setZones: (zones) => set({ zones }),
 
   setSyncing: (syncing) => set({ isSyncing: syncing }),
 

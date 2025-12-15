@@ -40,10 +40,6 @@ export function useIPC() {
     return window.electronAPI.getDevices();
   }, []);
 
-  const getZones = useCallback(async () => {
-    return window.electronAPI.getZones();
-  }, []);
-
   const getSettings = useCallback(async () => {
     return window.electronAPI.getSettings();
   }, []);
@@ -58,7 +54,6 @@ export function useIPC() {
 
   return {
     getDevices,
-    getZones,
     getSettings,
     updateSettings,
     getDiscordStatus,

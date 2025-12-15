@@ -5,7 +5,7 @@ import { wledService } from '../services/wled.service';
 import { discordService } from '../services/discord.service';
 import { trayService } from '../services/tray.service';
 import { logger } from '../utils/logger';
-import type { VoiceState, DiscordState } from '@shared/types';
+import type { VoiceState, DiscordState, EffectConfig } from '@shared/types';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Device CRUD handlers
@@ -72,14 +72,14 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
-  // Preview device color handler
-  ipcMain.handle('devices:preview-color', async (_event, deviceId: string, color: string, brightness: number) => {
+  // Preview device color handler (with optional effect)
+  ipcMain.handle('devices:preview-color', async (_event, deviceId: string, color: string, brightness: number, effect?: EffectConfig) => {
     try {
       const device = configService.getDevices().find(d => d.id === deviceId);
       if (!device) {
         return { success: false, error: 'Device not found' };
       }
-      const result = await wledService.previewDeviceColor(device.ip_address, color, brightness);
+      const result = await wledService.setDeviceColor(device.ip_address, color, brightness, 0, effect);
       return { success: result };
     } catch (error: any) {
       logger.error('Preview color failed:', error);
@@ -94,9 +94,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
       if (!device) {
         return { success: false, error: 'Device not found' };
       }
-      const zones = configService.getZones().filter(z => z.device_id === deviceId);
       const effectiveState = discordService.getEffectiveState();
-      await wledService.restoreDeviceFromState(effectiveState, device, zones);
+      await wledService.restoreDeviceFromState(effectiveState, device);
       return { success: true };
     } catch (error: any) {
       logger.error('Restore state failed:', error);
@@ -104,67 +103,46 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
-  // Zone CRUD handlers
-  ipcMain.handle('zones:create', async (_event, zoneData) => {
+  // Get effects list from device
+  ipcMain.handle('devices:get-effects', async (_event, deviceId: string) => {
     try {
-      const zone = configService.createZone(zoneData);
-      logger.info('Zone created:', zone.id);
-      return { success: true, zone };
+      const device = configService.getDevices().find(d => d.id === deviceId);
+      if (!device) {
+        return { success: false, error: 'Device not found', effects: [] };
+      }
+      const info = await wledService.getDeviceInfo(device.ip_address);
+      if (!info) {
+        return { success: false, error: 'Failed to fetch device info', effects: [] };
+      }
+      return { success: true, effects: info.effects };
     } catch (error: any) {
-      logger.error('Failed to create zone:', error);
-      return { success: false, error: error.message };
+      logger.error('Failed to get effects:', error);
+      return { success: false, error: error.message, effects: [] };
     }
   });
 
-  ipcMain.handle('zones:update', async (_event, id, updates) => {
+  // Capture current device state (for restore on app close)
+  ipcMain.handle('devices:capture-state', async (_event, deviceId: string) => {
     try {
-      const zone = configService.updateZone(id, updates);
-      if (!zone) {
-        return { success: false, error: 'Zone not found' };
-      }
-      logger.info('Zone updated:', id);
-      return { success: true, zone };
-    } catch (error: any) {
-      logger.error('Failed to update zone:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('zones:delete', async (_event, id) => {
-    try {
-      const success = configService.deleteZone(id);
-      if (!success) {
-        return { success: false, error: 'Zone not found' };
-      }
-      logger.info('Zone deleted:', id);
-      return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to delete zone:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Preview zone color handler
-  ipcMain.handle('zones:preview-color', async (_event, zoneId: string, color: string, brightness: number) => {
-    try {
-      const zone = configService.getZones().find(z => z.id === zoneId);
-      if (!zone) {
-        return { success: false, error: 'Zone not found' };
-      }
-      const device = configService.getDevices().find(d => d.id === zone.device_id);
+      const device = configService.getDevices().find(d => d.id === deviceId);
       if (!device) {
         return { success: false, error: 'Device not found' };
       }
-      const result = await wledService.previewZoneColor(
-        device.ip_address,
-        zone.start_led,
-        zone.end_led,
-        color,
-        brightness
-      );
-      return { success: result };
+      const state = await wledService.captureDeviceState(deviceId, device.ip_address);
+      return { success: !!state, state };
     } catch (error: any) {
-      logger.error('Preview zone color failed:', error);
+      logger.error('Failed to capture state:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Restore device to original captured state
+  ipcMain.handle('devices:restore-original', async (_event, deviceId: string) => {
+    try {
+      const restored = await wledService.restoreToOriginalState(deviceId);
+      return { success: restored };
+    } catch (error: any) {
+      logger.error('Failed to restore original state:', error);
       return { success: false, error: error.message };
     }
   });
@@ -172,11 +150,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // Get devices
   ipcMain.handle('config:get-devices', async () => {
     return configService.getDevices();
-  });
-
-  // Get zones
-  ipcMain.handle('config:get-zones', async () => {
-    return configService.getZones();
   });
 
   // Settings management
@@ -247,17 +220,16 @@ export function setupDiscordForwarding(mainWindow: BrowserWindow): void {
 
     // Update WLED devices with new effective state
     const devices = configService.getDevices();
-    const zones = configService.getZones();
-    wledService.updateAllDevices(effectiveState, devices, zones);
+    wledService.updateAllDevices(effectiveState, devices);
 
-    // Update tray based on effective state
-    const isMuted = effectiveState === 'muted' || effectiveState === 'deafened';
-    trayService.updateMuteState(isMuted);
+    // Update tray with current voice state (icon color + tooltip)
+    trayService.updateVoiceState(effectiveState);
 
     // Notify renderer with full state info
     mainWindow.webContents.send('discord:state-changed', effectiveState, fullState);
 
     // Also send legacy event for backward compatibility
+    const isMuted = effectiveState === 'muted' || effectiveState === 'deafened';
     mainWindow.webContents.send('discord:mute-state-changed', isMuted);
   });
 

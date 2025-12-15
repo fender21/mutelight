@@ -205,7 +205,7 @@ export function DeviceManager() {
 
   const handlePreviewColor = async (state: VoiceState, config: StateLightConfig) => {
     if (editingDevice) {
-      await window.electronAPI.previewDeviceColor(editingDevice.id, config.color, config.brightness);
+      await window.electronAPI.previewDeviceColor(editingDevice.id, config.color, config.brightness, config.effect);
     }
   };
 
@@ -391,6 +391,7 @@ export function DeviceManager() {
                   onChange={(stateColors) => setFormData({ ...formData, stateColors })}
                   onPreview={editingDevice ? handlePreviewColor : undefined}
                   onRestore={editingDevice ? handleRestoreState : undefined}
+                  deviceId={editingDevice?.id}
                   legacyMutedColor={formData.muted_color}
                   legacyUnmutedColor={formData.unmuted_color}
                 />
@@ -431,12 +432,12 @@ export function DeviceManager() {
                   <div className="flex gap-1">
                     <div
                       className="w-6 h-6 rounded"
-                      style={{ backgroundColor: device.unmuted_color }}
+                      style={{ backgroundColor: device.stateColors?.connected?.color || device.unmuted_color }}
                       title="Unmuted"
                     />
                     <div
                       className="w-6 h-6 rounded"
-                      style={{ backgroundColor: device.muted_color }}
+                      style={{ backgroundColor: device.stateColors?.muted?.color || device.muted_color }}
                       title="Muted"
                     />
                   </div>

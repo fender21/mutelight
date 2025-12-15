@@ -1,4 +1,4 @@
-import type { VoiceState, StateColors, StateLightConfig, WledDevice, LightZone } from './types';
+import type { VoiceState, StateColors, StateLightConfig, WledDevice, EffectConfig } from './types';
 
 // Default state light configurations
 export const DEFAULT_STATE_COLORS: StateColors = {
@@ -38,6 +38,13 @@ export const DEFAULT_STATE_COLORS: StateColors = {
 export const DEFAULT_BRIGHTNESS = 255;
 export const DEFAULT_TRANSITION_TIME = 0; // milliseconds
 
+// Default effect configuration (Solid color, no animation)
+export const DEFAULT_EFFECT_CONFIG: EffectConfig = {
+  effectId: 0,    // 0 = Solid
+  speed: 128,     // Medium speed (0-255)
+  intensity: 128, // Medium intensity (0-255)
+};
+
 /**
  * Calculate the effective voice state based on Discord state
  * Priority order (highest to lowest):
@@ -60,18 +67,12 @@ export function calculateEffectiveState(discordState: {
 
 /**
  * Get the light configuration for a specific state
- * Resolution order: zone override > device config > legacy colors > defaults
+ * Resolution order: device config > legacy colors > defaults
  */
 export function getStateLightConfig(
   state: VoiceState,
-  device: WledDevice,
-  zone?: LightZone
+  device: WledDevice
 ): StateLightConfig {
-  // Check zone-specific override first
-  if (zone?.stateColors?.[state]) {
-    return zone.stateColors[state] as StateLightConfig;
-  }
-
   // Check device-level state colors
   if (device.stateColors?.[state]) {
     return device.stateColors[state];
@@ -79,19 +80,17 @@ export function getStateLightConfig(
 
   // Fallback to legacy colors for muted/unmuted states
   if (state === 'muted' || state === 'deafened') {
-    const legacyColor = zone?.muted_color || device.muted_color;
     return {
-      color: legacyColor,
-      brightness: zone?.brightness ?? device.defaultBrightness ?? DEFAULT_BRIGHTNESS,
+      color: device.muted_color,
+      brightness: device.defaultBrightness ?? DEFAULT_BRIGHTNESS,
       enabled: true,
     };
   }
 
   if (state === 'connected' || state === 'speaking') {
-    const legacyColor = zone?.unmuted_color || device.unmuted_color;
     return {
-      color: legacyColor,
-      brightness: zone?.brightness ?? device.defaultBrightness ?? DEFAULT_BRIGHTNESS,
+      color: device.unmuted_color,
+      brightness: device.defaultBrightness ?? DEFAULT_BRIGHTNESS,
       enabled: true,
     };
   }
@@ -99,22 +98,22 @@ export function getStateLightConfig(
   // Use defaults for other states
   return {
     ...DEFAULT_STATE_COLORS[state],
-    brightness: zone?.brightness ?? device.defaultBrightness ?? DEFAULT_STATE_COLORS[state].brightness,
+    brightness: device.defaultBrightness ?? DEFAULT_STATE_COLORS[state].brightness,
   };
 }
 
 /**
  * Get brightness value with fallbacks
  */
-export function getBrightness(zone?: LightZone, device?: WledDevice): number {
-  return zone?.brightness ?? device?.defaultBrightness ?? DEFAULT_BRIGHTNESS;
+export function getBrightness(device?: WledDevice): number {
+  return device?.defaultBrightness ?? DEFAULT_BRIGHTNESS;
 }
 
 /**
  * Get transition time with fallbacks
  */
-export function getTransitionTime(zone?: LightZone, device?: WledDevice): number {
-  return zone?.transitionTime ?? device?.transitionTime ?? DEFAULT_TRANSITION_TIME;
+export function getTransitionTime(device?: WledDevice): number {
+  return device?.transitionTime ?? DEFAULT_TRANSITION_TIME;
 }
 
 /**
@@ -148,8 +147,8 @@ export function migrateFromLegacyColors(mutedColor: string, unmutedColor: string
 }
 
 /**
- * Check if device/zone has multi-state configuration
+ * Check if device has multi-state configuration
  */
-export function hasStateColors(deviceOrZone: WledDevice | LightZone): boolean {
-  return !!deviceOrZone.stateColors;
+export function hasStateColors(device: WledDevice): boolean {
+  return !!device.stateColors;
 }

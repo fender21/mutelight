@@ -3,9 +3,8 @@ import { Link } from 'react-router-dom';
 import { useAppStore } from '../store/appStore';
 import { useIPC } from '../hooks/useIPC';
 import { DeviceManager } from '../components/DeviceManager';
-import { ZoneManager } from '../components/ZoneManager';
 
-type TabType = 'app' | 'devices' | 'zones';
+type TabType = 'app' | 'devices';
 
 export function SettingsPage() {
   const { settings, setSettings } = useAppStore();
@@ -83,16 +82,6 @@ export function SettingsPage() {
             }`}
           >
             Devices
-          </button>
-          <button
-            onClick={() => setActiveTab('zones')}
-            className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === 'zones'
-                ? 'bg-[#a855f7] text-white'
-                : 'text-gray-400 hover:text-white hover:bg-[#2a2a2a]'
-            }`}
-          >
-            Zones
           </button>
         </div>
 
@@ -177,11 +166,6 @@ export function SettingsPage() {
         {/* Devices Tab */}
         {activeTab === 'devices' && (
           <DeviceManager />
-        )}
-
-        {/* Zones Tab */}
-        {activeTab === 'zones' && (
-          <ZoneManager />
         )}
 
         {/* App Info */}

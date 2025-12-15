@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { ColorPicker } from './ColorPicker';
 import { BrightnessSlider } from './BrightnessSlider';
-import type { StateColors, StateLightConfig, VoiceState } from '@shared/types';
+import { EffectSelector } from './EffectSelector';
+import type { StateColors, StateLightConfig, VoiceState, EffectConfig } from '@shared/types';
 import { DEFAULT_STATE_COLORS } from '@shared/defaults';
 
 interface StateColorEditorProps {
@@ -9,6 +10,7 @@ interface StateColorEditorProps {
   onChange: (stateColors: StateColors) => void;
   onPreview?: (state: VoiceState, config: StateLightConfig) => void;
   onRestore?: () => void;
+  deviceId?: string;
   legacyMutedColor?: string;
   legacyUnmutedColor?: string;
 }
@@ -30,6 +32,7 @@ export function StateColorEditor({
   onChange,
   onPreview,
   onRestore,
+  deviceId,
   legacyMutedColor,
   legacyUnmutedColor,
 }: StateColorEditorProps) {
@@ -213,6 +216,17 @@ export function StateColorEditor({
                             [&::-webkit-slider-thumb]:cursor-pointer"
                         />
                       </div>
+
+                      {/* Effect Selector - only show when deviceId is provided (editing existing device) */}
+                      {deviceId && (
+                        <div className="pt-2 border-t border-gray-800/50">
+                          <EffectSelector
+                            deviceId={deviceId}
+                            effectConfig={config.effect}
+                            onChange={(effect: EffectConfig) => handleStateChange(state, { effect })}
+                          />
+                        </div>
+                      )}
 
                       {/* Preview Button */}
                       {onPreview && (
