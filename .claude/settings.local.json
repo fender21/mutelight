@@ -10,7 +10,15 @@
       "WebFetch(domain:github.com)",
       "Bash(cat:*)",
       "Bash(grep:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npm create:*)",
+      "Bash(mv:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(npx tailwindcss init:*)"
     ]
   }
 }
