@@ -171,3 +171,48 @@ export interface ApiKeySummary {
   prefix: string;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Integrations (directory instances + trigger rules)
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps a provider event to a beacon state. Event patterns support exact
+ * match, a trailing wildcard segment ("workflow_run.*"), or "*" (any).
+ */
+export interface TriggerRule {
+  event: string;
+  state: BeaconState;
+  ttlMs?: number;
+  enabled: boolean;
+}
+
+/** A user's connected copy of a catalog provider. */
+export interface IntegrationInstance {
+  id: string;
+  providerId: string; // references INTEGRATION_CATALOG
+  name: string;
+  enabled: boolean;
+  rules: TriggerRule[];
+  /**
+   * Inbound webhook path for 'webhook' providers, e.g. /api/hook/<token>.
+   * Absent for 'hooks'/'local' providers.
+   */
+  hookPath?: string;
+  /** Delivery stats for the instance's hook URL. */
+  lastEventAt: number | null;
+  lastEvent: string | null;
+  eventCount: number;
+  createdAt: string;
+}
+
+export interface CreateIntegrationRequest {
+  providerId: string;
+  name?: string;
+}
+
+export interface UpdateIntegrationRequest {
+  name?: string;
+  enabled?: boolean;
+  rules?: TriggerRule[];
+}

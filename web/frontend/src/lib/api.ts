@@ -26,6 +26,35 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Single-flight refresh: when the access token expires, a page load fires
+// many parallel requests that ALL 401 at once. Each racing its own refresh
+// is what used to log users out on reload (the losers' failures wiped the
+// session). All 401 handlers now await one shared refresh promise.
+let refreshInFlight: Promise<AuthTokens | null> | null = null;
+
+function refreshSession(): Promise<AuthTokens | null> {
+  if (!refreshInFlight) {
+    // Bare axios (not `api`): no auth header, no interceptor recursion
+    refreshInFlight = axios
+      .post<ApiResponse<AuthTokens>>(`${API_BASE_URL}/auth/refresh`, { refreshToken })
+      .then((response) =>
+        response.data.success && response.data.data ? response.data.data : null
+      )
+      .catch((err) => {
+        // Only a definitive rejection means the session is dead; a network
+        // blip or server restart should NOT log the user out
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          return null;
+        }
+        throw err;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 // Response interceptor for token refresh
 api.interceptors.response.use(
   (response) => response,
@@ -36,18 +65,20 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const response = await api.post<ApiResponse<AuthTokens>>('/auth/refresh', {
-          refreshToken,
-        });
-
-        if (response.data.success && response.data.data) {
-          setTokens(response.data.data);
-          originalRequest.headers.Authorization = `Bearer ${response.data.data.accessToken}`;
+        const tokens = await refreshSession();
+        if (tokens) {
+          setTokens(tokens);
+          originalRequest.headers.Authorization = `Bearer ${tokens.accessToken}`;
           return api(originalRequest);
         }
-      } catch (refreshError) {
+        // Refresh definitively rejected: session is over
         clearTokens();
-        window.location.href = '/login';
+        if (!window.location.pathname.startsWith('/login')) {
+          window.location.href = '/login';
+        }
+      } catch (refreshError) {
+        // Transient failure (network/restart): keep tokens, surface the
+        // original error and let the caller/user retry
       }
     }
 

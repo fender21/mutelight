@@ -60,9 +60,24 @@ CREATE TABLE IF NOT EXISTS wled_devices (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS integrations (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  hook_token TEXT UNIQUE,
+  rules TEXT NOT NULL DEFAULT '[]',
+  last_event_at INTEGER,
+  last_event TEXT,
+  event_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_gateways_user ON gateways(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_user ON wled_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_integrations_user ON integrations(user_id);
 `;
 
 export function initializeDatabase(): Database.Database {

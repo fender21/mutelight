@@ -4,8 +4,10 @@ import type {
   ApiKeySummary,
   DiscoveredDevice,
   GatewaySummary,
+  IntegrationInstance,
   ManagedDevice,
   StateLightConfigDTO,
+  UpdateIntegrationRequest,
 } from '../../../shared/protocol';
 
 /** Extract a readable message from an axios/backend error. */
@@ -107,6 +109,56 @@ export const keysApi = {
     await api.delete(`/keys/${id}`);
   },
 };
+
+// ---------------------------------------------------------------------------
+// Integrations (directory instances + trigger rules)
+// ---------------------------------------------------------------------------
+
+export const integrationsApi = {
+  async list(): Promise<IntegrationInstance[]> {
+    const res = await api.get<ApiResponse<{ integrations: IntegrationInstance[] }>>('/integrations');
+    return res.data.data?.integrations ?? [];
+  },
+
+  async create(providerId: string, name?: string): Promise<IntegrationInstance> {
+    const res = await api.post<ApiResponse<{ integration: IntegrationInstance }>>('/integrations', {
+      providerId,
+      ...(name?.trim() ? { name: name.trim() } : {}),
+    });
+    return res.data.data!.integration;
+  },
+
+  async update(id: string, patch: UpdateIntegrationRequest): Promise<IntegrationInstance> {
+    const res = await api.put<ApiResponse<{ integration: IntegrationInstance }>>(
+      `/integrations/${id}`,
+      patch
+    );
+    return res.data.data!.integration;
+  },
+
+  async remove(id: string): Promise<void> {
+    await api.delete(`/integrations/${id}`);
+  },
+};
+
+/**
+ * Origin the API is reachable at, for URLs the user copies into external
+ * tools. Resolved the same way lib/api.ts resolves the axios base: an
+ * absolute VITE_API_URL wins; a relative '/api' proxy means the current
+ * page origin forwards /api/* to the backend.
+ */
+export function apiDisplayOrigin(): string {
+  const base: string = import.meta.env.VITE_API_URL || '/api';
+  if (/^https?:\/\//i.test(base)) {
+    return base.replace(/\/api\/?$/, '');
+  }
+  return window.location.origin;
+}
+
+/** Full user-facing URL for an integration instance's inbound hook path. */
+export function hookDisplayUrl(hookPath: string): string {
+  return apiDisplayOrigin() + hookPath;
+}
 
 // ---------------------------------------------------------------------------
 // Beacon state display defaults (mirrors the gateway's built-in defaults)

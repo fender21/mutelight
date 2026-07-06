@@ -33,8 +33,16 @@ Defined in `web/shared/protocol.ts` (canonical) and MIRRORED at `src/shared/prot
 - Gateway -> cloud WS: `device_auth {deviceToken}`, `status`, `discovery_result`, `state_report`
 - Cloud -> gateway WS: `auth_success`, `beacon {state, ttlMs?, source?}`, `config_sync {devices}`, `command (test_flash)`, `error`
 - Cloud -> dashboard WS: `gateway_update {gatewayId, online, status?, discovered?}` (dashboard authenticates with `{type:'auth', token: <JWT>}`)
-- REST: `/api/pair/start|poll` (public, used by the gateway), `/api/pair/claim` (JWT), `/api/beacon` (API key), `/api/devices*`, `/api/keys*`, `/api/gateways*` (JWT)
+- REST: `/api/pair/start|poll` (public, used by the gateway), `/api/pair/claim` (JWT), `/api/beacon` (API key), `/api/hook/:token` (public inbound webhooks), `/api/devices*`, `/api/keys*`, `/api/gateways*`, `/api/integrations*` (JWT)
 - Pairing is TV-style: gateway shows a 6-char code, user enters it in the dashboard, gateway polls until it receives its one-time device token.
+
+## Integration directory
+
+- Curated static catalog in `web/shared/integrations.ts` (`INTEGRATION_CATALOG`): claude-code (hooks-kind), github/stripe/shopify/home-assistant/zapier/ifttt/generic-webhook (webhook-kind), discord (local-kind, informational). Each entry ships setup steps, event examples, and default `TriggerRule`s. This is deliberately NOT a third-party plugin SDK — adding a provider = adding a catalog entry (+ an event extractor case in `hook.routes.ts` if its payload shape is special).
+- Instances live in the `integrations` table; webhook-kind instances get a per-instance unguessable `hook_token` — the URL is the credential; deleting the instance revokes it.
+- Inbound flow: `POST /api/hook/:token` → per-provider event extraction (github: `X-GitHub-Event` + `payload.action` as `event.action`; stripe: `payload.type`; shopify: `X-Shopify-Topic`; default: `payload.event ?? state ?? type`) → first enabled matching rule wins (exact, trailing `.*` wildcard, or `*`) → `wsServer.sendBeaconToUser`. Unknown tokens get 404, matched/unmatched always 200.
+- Advanced Mode (dashboard, per integration) edits the rules array. Semantics: first matching rule wins; a DISABLED matching rule silences the event; instance-level toggle disables everything.
+- `/api/beacon` consults hooks-kind instances (Claude Code) via `integrationService.applyBeaconRules` so users can remap/silence states without editing their hook commands; `state:'clear'` always passes through.
 
 ## Gateway (Electron) architecture
 

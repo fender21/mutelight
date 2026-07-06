@@ -179,6 +179,54 @@ async function main() {
   const g = gws.json.data.gateways.find((x) => x.id === gatewayId);
   check('gateway listed online', g && g.online === true, gws.json.data);
 
+  console.log('10. Integration directory: webhook -> rule -> beacon');
+  const intRes = await api('POST', '/api/integrations', { providerId: 'github', name: 'E2E GitHub' }, jwt);
+  const integration = intRes.json?.data?.integration;
+  check('github integration created with hook URL + default rules',
+    intRes.status === 201 && integration.hookPath && integration.rules.length >= 2, intRes.json);
+
+  const hookUrl = `${API}${integration.hookPath}`;
+  const beaconP2 = waitForMessage(gw, 'beacon', 8000, (m) => m.payload.source === 'github');
+  const hookRes = await fetch(hookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-GitHub-Event': 'workflow_run' },
+    body: JSON.stringify({ action: 'completed', workflow_run: { conclusion: 'success' } }),
+  });
+  const hookJson = await hookRes.json();
+  check('github webhook matched default rule', hookJson.data?.matched === true && hookJson.data?.delivered >= 1, hookJson);
+  const ghBeacon = await beaconP2;
+  check('gateway received webhook-triggered beacon', ghBeacon.payload.state === 'claude-done' && ghBeacon.payload.source === 'github', ghBeacon);
+
+  const missRes = await fetch(hookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-GitHub-Event': 'watch' },
+    body: JSON.stringify({ action: 'started' }),
+  });
+  const missJson = await missRes.json();
+  check('unmatched event recorded but not fired', missJson.data?.matched === false, missJson);
+
+  const bogus = await fetch(`${API}/api/hook/nope`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  check('bogus hook token -> 404', bogus.status === 404, bogus.status);
+
+  const updated = await api('PUT', `/api/integrations/${integration.id}`, {
+    rules: [{ event: 'workflow_run.*', state: 'streaming', ttlMs: 2000, enabled: true }],
+  }, jwt);
+  check('rules editable (Advanced Mode persistence)',
+    updated.json?.data?.integration?.rules?.[0]?.state === 'streaming', updated.json);
+
+  const beaconP3 = waitForMessage(gw, 'beacon', 8000, (m) => m.payload.source === 'github' && m.payload.state === 'streaming');
+  await fetch(hookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-GitHub-Event': 'workflow_run' },
+    body: JSON.stringify({ action: 'requested' }),
+  });
+  const wildBeacon = await beaconP3;
+  check('wildcard rule (workflow_run.*) fires remapped state', wildBeacon.payload.state === 'streaming', wildBeacon);
+
+  await api('DELETE', `/api/integrations/${integration.id}`, null, jwt);
+  const afterDelete = await fetch(hookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  check('deleted integration hook -> 404 (token revoked)', afterDelete.status === 404, afterDelete.status);
+
   gw.close();
   dash.close();
   console.log(`\nRESULT: ${passed} passed, ${failed} failed`);

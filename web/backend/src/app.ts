@@ -15,6 +15,8 @@ import beaconRoutes from './routes/beacon.routes';
 import keysRoutes from './routes/keys.routes';
 import devicesRoutes from './routes/devices.routes';
 import gatewaysRoutes from './routes/gateways.routes';
+import integrationsRoutes from './routes/integrations.routes';
+import hookRoutes from './routes/hook.routes';
 
 export function createApp() {
   const app = express();
@@ -69,6 +71,8 @@ export function createApp() {
   app.use('/api/keys', keysRoutes);
   app.use('/api/devices', devicesRoutes);
   app.use('/api/gateways', gatewaysRoutes);
+  app.use('/api/integrations', integrationsRoutes);
+  app.use('/api/hook', hookRoutes);
 
   // Error handling
   app.use(notFoundHandler);

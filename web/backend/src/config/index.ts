@@ -20,12 +20,16 @@ export const config = {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
     accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
-    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
+    // 30 days: "stay signed in" like modern web apps. Sessions end on
+    // explicit logout or 30d after login, whichever comes first.
+    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '30d',
   },
   
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+    // A dashboard session (login + polling) plus inbound webhooks easily
+    // exceeds 100 req/15min from one IP — 100 throttled legitimate use.
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000', 10),
   },
   
   websocket: {

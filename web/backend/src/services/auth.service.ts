@@ -73,15 +73,21 @@ export class AuthService {
     try {
       const payload = jwt.verify(refreshToken, config.jwt.refreshSecret) as any;
 
-      db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
-      const tokens = this.generateTokens(payload.userId);
-      db.prepare('INSERT INTO refresh_tokens (token, user_id) VALUES (?, ?)').run(
-        tokens.refreshToken,
-        payload.userId
+      // Issue a fresh access token but keep the refresh token stable.
+      // Rotating it on every refresh made concurrent refreshes fatal:
+      // parallel 401s (page load, multiple tabs) raced, the first rotated
+      // the token, and every loser's session got wiped — the classic
+      // "refreshing the page logs me out" bug. The token stays valid
+      // until it expires (30d) or the user logs out.
+      const accessToken = jwt.sign(
+        { userId: payload.userId, jti: randomUUID() },
+        config.jwt.accessSecret,
+        { expiresIn: config.jwt.accessExpiry } as jwt.SignOptions
       );
 
-      return tokens;
+      return { accessToken, refreshToken };
     } catch (error) {
+      // Signature invalid or expired: this token is dead, remove it
       db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
       throw new UnauthorizedError('Invalid refresh token');
     }
@@ -108,11 +114,14 @@ export class AuthService {
   }
 
   private generateTokens(userId: string): AuthTokens {
-    const accessToken = jwt.sign({ userId }, config.jwt.accessSecret, {
+    // jti makes every token unique. Without it, two logins inside the same
+    // second mint byte-identical JWTs (same payload + same iat second),
+    // which collides on the refresh_tokens primary key -> 500.
+    const accessToken = jwt.sign({ userId, jti: randomUUID() }, config.jwt.accessSecret, {
       expiresIn: config.jwt.accessExpiry,
     } as jwt.SignOptions);
 
-    const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret, {
+    const refreshToken = jwt.sign({ userId, jti: randomUUID() }, config.jwt.refreshSecret, {
       expiresIn: config.jwt.refreshExpiry,
     } as jwt.SignOptions);
 
