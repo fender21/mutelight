@@ -28,6 +28,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
 };
 
+// Production cloud endpoints — used as bridge defaults when the app is
+// packaged (installed builds talk to mutebeacon.com; dev talks to localhost)
+export const PRODUCTION_BRIDGE = {
+  serverUrl: 'wss://mutebeacon.com/gateway',
+  apiUrl: 'https://mutebeacon.com',
+  dashboardUrl: 'https://mutebeacon.com',
+  deviceToken: null as string | null,
+};
+
 // Bridge (cloud connection) constants
 export const BRIDGE_RECONNECT_DELAY = 5000; // 5 seconds, doubles up to max
 export const BRIDGE_RECONNECT_MAX_DELAY = 60000; // 1 minute cap

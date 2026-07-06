@@ -1,7 +1,8 @@
 import Store from 'electron-store';
+import { app } from 'electron';
 import { randomUUID } from 'crypto';
 import type { AppConfig, AppSettings, WledDevice } from '@shared/types';
-import { DEFAULT_SETTINGS } from '@shared/constants';
+import { DEFAULT_SETTINGS, PRODUCTION_BRIDGE } from '@shared/constants';
 
 interface StoreSchema {
   config: AppConfig;
@@ -54,12 +55,14 @@ class ConfigService {
   // Settings methods
   getSettings(): AppSettings {
     // Merge over defaults so settings added in newer versions (e.g. bridge)
-    // exist even for stores written by older versions
+    // exist even for stores written by older versions. Packaged builds
+    // default to the production cloud; dev builds default to localhost.
+    const bridgeDefaults = app.isPackaged ? PRODUCTION_BRIDGE : DEFAULT_SETTINGS.bridge;
     const stored = this.store.get('settings');
     return {
       ...DEFAULT_SETTINGS,
       ...stored,
-      bridge: { ...DEFAULT_SETTINGS.bridge, ...(stored as Partial<AppSettings>).bridge },
+      bridge: { ...bridgeDefaults, ...(stored as Partial<AppSettings>).bridge },
     };
   }
 

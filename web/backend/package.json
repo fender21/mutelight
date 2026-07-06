@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/backend/src/index.js",
     "type-check": "tsc --noEmit",
-    "test:e2e": "node scripts/e2e-gateway.js"
+    "test:e2e": "node scripts/e2e-gateway.js",
+    "start:prod": "ts-node --transpile-only -r tsconfig-paths/register src/index.ts"
   },
   "keywords": [],
   "author": "",
