@@ -1,14 +1,15 @@
 import { Tray, Menu, nativeImage, BrowserWindow, app, NativeImage } from 'electron';
 import { logger } from '../utils/logger';
-import type { VoiceState } from '@shared/types';
+import type { BeaconState } from '@shared/types';
 import { DEFAULT_STATE_COLORS } from '@shared/defaults';
+import { stateManager } from './state-manager.service';
 
 class TrayService {
   private tray: Tray | null = null;
   private mainWindow: BrowserWindow | null = null;
   private muteState = false;
   private discordConnected = false;
-  private currentState: VoiceState = 'idle';
+  private currentState: BeaconState = 'idle';
   private currentColor: string = '#666666';
 
   /**
@@ -24,7 +25,7 @@ class TrayService {
       this.tray = new Tray(icon);
       this.currentColor = initialColor;
 
-      this.tray.setToolTip('MuteLight - Disconnected');
+      this.tray.setToolTip('MuteBeacon - Starting...');
 
       // Handle double-click to show window
       this.tray.on('double-click', () => {
@@ -75,9 +76,9 @@ class TrayService {
   /**
    * Get the color for a given voice state
    */
-  private getColorForState(state: VoiceState): string {
+  private getColorForState(state: BeaconState): string {
     // Map state to color from defaults
-    const stateConfig = DEFAULT_STATE_COLORS[state];
+    const stateConfig = (DEFAULT_STATE_COLORS as Record<string, typeof DEFAULT_STATE_COLORS.idle>)[state];
     if (stateConfig) {
       return stateConfig.color;
     }
@@ -104,7 +105,7 @@ class TrayService {
   /**
    * Update effective voice state and tray icon
    */
-  updateVoiceState(state: VoiceState): void {
+  updateVoiceState(state: BeaconState): void {
     this.currentState = state;
     const color = this.getColorForState(state);
     this.updateTrayIcon(color);
@@ -120,9 +121,16 @@ class TrayService {
     if (!this.tray) return;
 
     const stateDisplay = this.currentState.charAt(0).toUpperCase() + this.currentState.slice(1);
+    const manualActive = stateManager.getSourceState('manual') !== null;
+
+    const setManual = (state: BeaconState | null) => () => {
+      stateManager.setSourceState('manual', state);
+      this.updateContextMenu();
+    };
+
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Open MuteLight',
+        label: 'Open MuteBeacon',
         click: () => this.showWindow(),
       },
       { type: 'separator' },
@@ -131,15 +139,23 @@ class TrayService {
         enabled: false,
       },
       {
-        label: `State: ${stateDisplay}`,
+        label: `State: ${stateDisplay}${manualActive ? ' (manual)' : ''}`,
         enabled: false,
       },
       { type: 'separator' },
       {
-        label: 'Sync Settings',
-        click: () => {
-          this.mainWindow?.webContents.send('tray:sync-requested');
-        },
+        label: 'Lights',
+        submenu: [
+          { label: 'Set Muted', click: setManual('muted') },
+          { label: 'Set Unmuted', click: setManual('connected') },
+          { label: 'Lights Off', click: setManual('off') },
+          { type: 'separator' },
+          {
+            label: 'Resume Automatic',
+            enabled: manualActive,
+            click: setManual(null),
+          },
+        ],
       },
       { type: 'separator' },
       {
@@ -177,13 +193,10 @@ class TrayService {
   private updateTooltip(): void {
     if (!this.tray) return;
 
-    let tooltip = 'MuteLight';
-    if (this.discordConnected) {
-      // Capitalize state name for display
-      const stateDisplay = this.currentState.charAt(0).toUpperCase() + this.currentState.slice(1);
-      tooltip += ` - ${stateDisplay}`;
-    } else {
-      tooltip += ' - Disconnected';
+    const stateDisplay = this.currentState.charAt(0).toUpperCase() + this.currentState.slice(1);
+    let tooltip = `MuteBeacon - ${stateDisplay}`;
+    if (!this.discordConnected) {
+      tooltip += ' (Discord disconnected)';
     }
 
     this.tray.setToolTip(tooltip);

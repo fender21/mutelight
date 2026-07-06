@@ -24,7 +24,7 @@ class DiscoveryService {
       // Browse for WLED services (_wled._tcp)
       const browser = this.bonjour.find({ type: 'wled' });
 
-      browser.on('up', (service) => {
+      browser.on('up', (service: any) => {
         logger.debug('mDNS service found:', {
           name: service.name,
           type: service.type,
@@ -34,7 +34,7 @@ class DiscoveryService {
         });
 
         // Extract IPv4 address
-        const ipv4 = service.addresses?.find(addr =>
+        const ipv4 = service.addresses?.find((addr: string) =>
           /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr)
         );
 
@@ -53,7 +53,7 @@ class DiscoveryService {
         }
       });
 
-      browser.on('error', (err) => {
+      browser.on('error', (err: unknown) => {
         logger.error('mDNS browser error:', err);
       });
 

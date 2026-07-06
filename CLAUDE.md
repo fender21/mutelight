@@ -4,151 +4,79 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MuteLight is an Electron desktop application that monitors Discord mute status via Discord RPC and controls WLED LED strips to provide visual feedback. The application uses a multi-process Vite build system with separate main, preload, and renderer processes.
+MuteBeacon (repo name: mutelight) turns WLED LED strips into a status beacon. It has two halves:
+
+- **Desktop gateway** (repo root, Electron): thin client. Outbound WebSocket bridge to the cloud, local WLED control + mDNS discovery, Discord RPC (the one integration that must run locally), tray with manual overrides. Deliberately has NO device-management UI.
+- **Cloud** (`web/`): Express API (port 3001) + WebSocket server (port 3002) + React dashboard (port 5174). SQLite persistence. The dashboard is the single management surface: devices, per-state colors, API keys, integrations, pairing.
+
+Architecture rule (do not regress): every integration triggers via `POST /api/beacon` on the cloud — never via local listeners on the client. Discord is the grandfathered local exception.
 
 ## Common Commands
 
-### Development
 ```bash
-npm run dev              # Start development server with hot reload
-npm run build            # Build all processes for production
-npm run build:main       # Build only main process
-npm run build:preload    # Build only preload script
-npm run build:renderer   # Build only renderer (React UI)
-npm run package          # Build and create distributable packages
-npm run type-check       # Run TypeScript type checking
+# Desktop gateway (repo root)
+npm run dev              # dev with hot reload (Vite + Electron)
+npm run build            # build main + preload + renderer
+npm run package          # electron-builder distributables
+npm run type-check       # tsc; tsconfig.main.json + tsconfig.renderer.json cover everything
+
+# Cloud
+cd web/backend && npm run dev     # ts-node + nodemon; SQLite at ./data (DATABASE_PATH to override)
+cd web/backend && npm run type-check
+cd web/frontend && npm run dev    # Vite on 5174, /api proxied to 3001
 ```
 
-### Build Process
-The dev script (`scripts/dev.js`) orchestrates a multi-stage startup:
-1. Starts Vite dev server for renderer (port 5173)
-2. Builds main process in watch mode
-3. Builds preload script in watch mode
-4. Launches Electron after 3-second delay
+## The Bridge Protocol (core contract)
 
-## Architecture
+Defined in `web/shared/protocol.ts` (canonical) and MIRRORED at `src/shared/protocol.ts` — separate TS project roots; keep both files identical apart from the header comment.
 
-### Process Structure
-- **Main Process** (`src/main/`): Electron main process, handles system integration, Discord RPC, WLED control
-- **Preload Script** (`src/main/preload.ts`): IPC bridge between main and renderer
-- **Renderer Process** (`src/renderer/`): React-based UI running in browser context
+- Gateway -> cloud WS: `device_auth {deviceToken}`, `status`, `discovery_result`, `state_report`
+- Cloud -> gateway WS: `auth_success`, `beacon {state, ttlMs?, source?}`, `config_sync {devices}`, `command (test_flash)`, `error`
+- Cloud -> dashboard WS: `gateway_update {gatewayId, online, status?, discovered?}` (dashboard authenticates with `{type:'auth', token: <JWT>}`)
+- REST: `/api/pair/start|poll` (public, used by the gateway), `/api/pair/claim` (JWT), `/api/beacon` (API key), `/api/hook/:token` (public inbound webhooks), `/api/devices*`, `/api/keys*`, `/api/gateways*`, `/api/integrations*` (JWT)
+- Pairing is TV-style: gateway shows a 6-char code, user enters it in the dashboard, gateway polls until it receives its one-time device token.
 
-### Core Services (Main Process)
+## Integration directory
 
-#### Discord Service (`src/main/services/discord.service.ts`)
-- Uses `@xhayper/discord-rpc` client library
-- Two modes: Event subscription (VOICE_SETTINGS_UPDATE) with polling fallback
-- Emits `muteStateChanged` events when user mutes/unmutes or deafens
-- Handles reconnection with exponential backoff (max 10 attempts)
-- Discord Client ID: `1439804981132660797` (defined in constants)
+- Curated static catalog in `web/shared/integrations.ts` (`INTEGRATION_CATALOG`): claude-code (hooks-kind), github/stripe/shopify/home-assistant/zapier/ifttt/generic-webhook (webhook-kind), discord (local-kind, informational). Each entry ships setup steps, event examples, and default `TriggerRule`s. This is deliberately NOT a third-party plugin SDK — adding a provider = adding a catalog entry (+ an event extractor case in `hook.routes.ts` if its payload shape is special).
+- Instances live in the `integrations` table; webhook-kind instances get a per-instance unguessable `hook_token` — the URL is the credential; deleting the instance revokes it.
+- Inbound flow: `POST /api/hook/:token` → per-provider event extraction (github: `X-GitHub-Event` + `payload.action` as `event.action`; stripe: `payload.type`; shopify: `X-Shopify-Topic`; default: `payload.event ?? state ?? type`) → first enabled matching rule wins (exact, trailing `.*` wildcard, or `*`) → `wsServer.sendBeaconToUser`. Unknown tokens get 404, matched/unmatched always 200.
+- Advanced Mode (dashboard, per integration) edits the rules array. Semantics: first matching rule wins; a DISABLED matching rule silences the event; instance-level toggle disables everything.
+- `/api/beacon` consults hooks-kind instances (Claude Code) via `integrationService.applyBeaconRules` so users can remap/silence states without editing their hook commands; `state:'clear'` always passes through.
 
-#### WLED Service (`src/main/services/wled.service.ts`)
-- Controls WLED devices via HTTP JSON API (`http://{ip}/json/state`)
-- Supports both full-device colors and zone-specific control (LED segments)
-- Retry logic: 3 attempts with 1s delay, 5s timeout per request
-- Uses `Promise.allSettled` to update all devices in parallel without blocking
+## Gateway (Electron) architecture
 
-#### Config Service (`src/main/services/config.service.ts`)
-- Uses `electron-store` for persistent local storage
-- Stores: devices (WledDevice[]), zones (LightZone[]), settings (AppSettings)
-- All IDs are UUIDs generated with `crypto.randomUUID()`
-- Deleting a device automatically deletes associated zones
+- `src/main/services/state-manager.service.ts` — THE hub. Sources feed states in; priority `manual(100) > bridge(50) > discord(10)`; TTL support for transient states; single `stateChanged` event drives everything.
+- `src/main/ipc/handlers.ts` — `setupStateForwarding()` holds the one fan-out (WLED + tray + renderer). New event sources must register with the StateManager, never fan out directly.
+- `src/main/services/bridge.service.ts` — outbound WS to cloud: pairing flow, applies `beacon`/`config_sync`/`command`, streams status + mDNS discovery up. Reconnects with doubling backoff.
+- `src/main/services/discord.service.ts` — Discord RPC; emits into StateManager as source 'discord'. Polling + event subscription.
+- `src/main/services/wled.service.ts` — WLED HTTP JSON API; brightness 0 = lights off (`on:false`); 3 retries.
+- `src/main/services/config.service.ts` — electron-store; devices are a synced CACHE of cloud config (`config_sync` overwrites them), settings include `bridge {serverUrl, apiUrl, dashboardUrl, deviceToken}`.
+- Renderer (`src/renderer/src/App.tsx`) — single screen: pairing code / bridge status / Discord status / two local toggles. Keep it minimal; anything device-related belongs in the web dashboard.
+- Beacon states are OPEN-ENDED strings (`BeaconState`). Known states get defaults in `src/shared/defaults.ts` (`DEFAULT_STATE_COLORS`, includes `claude-working/attention/done`, `off`). Unknown states with no per-device color are ignored (lights untouched).
 
-#### Discovery Service (`src/main/services/discovery.service.ts`)
-- Uses `bonjour-service` for mDNS discovery of WLED devices
-- Service type: `_wled._tcp.local`
-- Default timeout: 10 seconds
+## Cloud architecture
 
-#### Tray Service (`src/main/services/tray.service.ts`)
-- System tray with context menu showing connection/mute status
-- Updates in real-time based on Discord events
+- `web/backend/src/services/database.service.ts` — better-sqlite3, schema applied at boot (users, refresh_tokens, gateways, pair_codes, api_keys, wled_devices).
+- `web/backend/src/services/beacon.service.ts` — pairing, gateways, API keys (sha256-hashed, `mb_` prefix, full key returned once), managed devices (stateColors stored as JSON).
+- `web/backend/src/websocket/server.ts` — singleton `wsServer`; tracks gateway sockets + dashboard sessions per user; pushes `config_sync` on gateway connect and on any device edit; mirrors gateway status/discovery to dashboard sessions.
+- Routes in `web/backend/src/routes/`: beacon.routes.ts authenticates by API key, everything else by JWT middleware.
+- Backend tsconfig `rootDir` is `..` so `web/shared` compiles in; build output lands at `dist/backend/src`, hence `npm start` runs `node dist/backend/src/index.js`.
 
-### IPC Communication (`src/main/ipc/handlers.ts`)
+## Claude Code integration
 
-Key IPC channels:
-- `devices:create/update/delete` - Device CRUD operations
-- `devices:discover` - Trigger mDNS discovery
-- `devices:test-connection` - Check if device is online
-- `zones:create/update/delete` - Zone CRUD operations
-- `config:get-devices/zones` - Retrieve configuration
-- `settings:get/update` - Settings management
-- `discord:get-status` - Get current Discord connection/mute state
-- `discord:mute-state-changed` - Event from main to renderer (mute changed)
-- `discord:connection-changed` - Event from main to renderer (connection changed)
+Claude Code hooks POST to `/api/beacon` with an API key (snippet generated on the dashboard Integrations page): `Notification` -> `claude-attention` (sticky purple blink), `Stop` -> `claude-done` with `ttlMs` (green flash, then falls back to Discord state). `state: "clear"` releases the bridge override.
 
-**Event Flow**: Discord service emits events → handlers in `setupDiscordForwarding` → triggers WLED updates + tray updates + forwards to renderer via `webContents.send`
+## Testing
 
-### Data Types (`src/shared/types.ts`)
-
-Core interfaces:
-- `WledDevice`: Stores device name, IP, muted/unmuted colors (hex strings)
-- `LightZone`: Associates LED segments (start_led to end_led) with a device
-- `AppSettings`: autoStart, minimizeToTray, pollingInterval, theme
-- `DiscordState`: connected, muted, deafened, lastUpdate
-
-### Frontend Architecture
-
-#### State Management (`src/renderer/src/store/appStore.ts`)
-- Uses Zustand for global state
-- Stores: devices, zones, settings, Discord state
-
-#### React Router Setup
-- Uses HashRouter (required for Electron file:// protocol)
-- Routes: `/dashboard` (main view), `/settings`
-- Default redirect: `/` → `/dashboard`
-
-#### Key Components
-- `DeviceManager`: Device CRUD with discovery
-- `ZoneManager`: Zone configuration per device
-- `ColorPicker`: Uses `react-colorful` library
-- `StatusIndicator`: Shows Discord connection and mute state
-
-### Constants (`src/shared/constants.ts`)
-
-- Discord Client ID: `1439804981132660797`
-- Default polling interval: 500ms
-- WLED timeout: 5s, 3 retry attempts
-- Discord reconnect: 5s delay, max 10 attempts
-- Color scheme: Dark backgrounds (#0a0a0a to #1a1a1a), green accent (#22c55e), purple accent (#a855f7)
+There are no unit tests yet. Verify client changes with `npm run type-check` + `npm run build`; verify server changes by booting the backend and exercising the REST/WS protocol (an E2E gateway simulator with 19 checks — pairing, WS auth, discovery, config sync, beacon delivery, test flash, live dashboard updates — was used to validate the protocol; it simulates the gateway with plain `ws`).
 
 ## Build Configuration
 
-### Vite Configs
-Three separate configs for three build targets:
-- `vite.config.main.ts`: Builds to `dist-main/`, CJS format, externalizes Electron APIs
-- `vite.config.preload.ts`: Builds to `dist-preload/`, CJS format
-- `vite.config.renderer.ts`: Builds to `dist-renderer/`, standard SPA build
+Three Vite configs at the root build the Electron app: `vite.config.main.ts` (CJS -> dist-main, externals include `ws`), `vite.config.preload.ts` (dist-preload), `vite.config.renderer.ts` (dist-renderer). Path aliases: `@main`, `@renderer`, `@shared` (client `src/shared`). The backend/frontend alias `@shared` to `web/shared`.
 
-Path aliases:
-- `@main` → `src/main`
-- `@renderer` → `src/renderer/src`
-- `@shared` → `src/shared`
+## Security notes
 
-### Electron Builder
-Package command uses `electron-builder` configuration in package.json for creating platform-specific installers (NSIS/portable for Windows, DMG for macOS, AppImage for Linux).
-
-## Important Implementation Details
-
-### WLED Color Control
-- Device-level: Sets entire strip via `seg: [{ col: [[r,g,b]] }]`
-- Zone-level: Sets LED range via `seg: { i: [startLed, [r,g,b], endLed] }`
-- Colors stored as hex strings, converted to RGB arrays before sending
-
-### Discord Mute Detection
-The app monitors both self_mute/self_deaf (user-controlled) AND mute/deaf (server-controlled). A user is considered "muted" if ANY of these flags is true, which then triggers the WLED update.
-
-### Error Handling
-- WLED devices that fail after retries are marked offline but don't block other devices
-- Discord disconnection triggers automatic reconnection with exponential backoff
-- All IPC handlers return `{ success: boolean, error?: string }` structure
-
-### Minimize to Tray Behavior
-When `minimizeToTray` setting is enabled, closing the window hides it instead of quitting. The `isQuitting` flag on app object distinguishes user-initiated quit from window close.
-
-## Development Tips
-
-- Main process changes require Electron restart (dev script handles this via watch mode)
-- Renderer changes use Vite HMR (instant reload)
-- Check `dist-main/index.js` if main process fails to build correctly
-- Use `logger` service (Winston) for debugging; logs appear in terminal
-- DevTools available in development mode via `mainWindow.webContents.openDevTools()`
+- Gateway device tokens and API keys are stored hashed (sha256) server-side; pairing codes expire after 10 minutes; device token delivered exactly once via poll.
+- JWT secrets default to dev values — `JWT_ACCESS_SECRET`/`JWT_REFRESH_SECRET` are required in production (`validateConfig`).
+- KNOWN ISSUE: `DISCORD_CLIENT_SECRET` is still hardcoded in `src/shared/constants.ts` and must be rotated + moved to runtime config (tracked separately).

@@ -1,85 +1,100 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { config } from '../config';
 import { User, AuthTokens } from '@shared/types';
 import { UnauthorizedError, ConflictError } from '../utils/errors';
 import { logger } from '../utils/logger';
+import { getDb } from './database.service';
 
-// Temporary in-memory storage (replace with database)
-const users = new Map<string, User & { password: string }>();
-const refreshTokens = new Set<string>();
+interface UserRow {
+  id: string;
+  email: string;
+  password: string;
+  created_at: string;
+}
+
+function toUser(row: UserRow): User {
+  return { id: row.id, email: row.email, createdAt: new Date(row.created_at) };
+}
 
 export class AuthService {
   async register(email: string, password: string): Promise<User> {
-    // Check if user already exists
-    const existingUser = Array.from(users.values()).find(u => u.email === email);
-    if (existingUser) {
+    const db = getDb();
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (existing) {
       throw new ConflictError('User already exists');
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Create user
-    const user: User & { password: string } = {
-      id: crypto.randomUUID(),
+    const id = randomUUID();
+    db.prepare('INSERT INTO users (id, email, password) VALUES (?, ?, ?)').run(
+      id,
       email,
-      password: hashedPassword,
-      createdAt: new Date(),
-    };
-
-    users.set(user.id, user);
+      hashedPassword
+    );
     logger.info(`User registered: ${email}`);
 
-    // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow;
+    return toUser(row);
   }
 
   async login(email: string, password: string): Promise<AuthTokens> {
-    // Find user
-    const user = Array.from(users.values()).find(u => u.email === email);
+    const db = getDb();
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as
+      | UserRow
+      | undefined;
     if (!user) {
       throw new UnauthorizedError('Invalid credentials');
     }
 
-    // Verify password
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
       throw new UnauthorizedError('Invalid credentials');
     }
 
-    // Generate tokens
     const tokens = this.generateTokens(user.id);
-    refreshTokens.add(tokens.refreshToken);
+    db.prepare('INSERT INTO refresh_tokens (token, user_id) VALUES (?, ?)').run(
+      tokens.refreshToken,
+      user.id
+    );
 
     logger.info(`User logged in: ${email}`);
     return tokens;
   }
 
   async refreshTokens(refreshToken: string): Promise<AuthTokens> {
-    // Verify refresh token
-    if (!refreshTokens.has(refreshToken)) {
+    const db = getDb();
+    const row = db.prepare('SELECT token FROM refresh_tokens WHERE token = ?').get(refreshToken);
+    if (!row) {
       throw new UnauthorizedError('Invalid refresh token');
     }
 
     try {
       const payload = jwt.verify(refreshToken, config.jwt.refreshSecret) as any;
-      
-      // Remove old token and generate new ones
-      refreshTokens.delete(refreshToken);
-      const tokens = this.generateTokens(payload.userId);
-      refreshTokens.add(tokens.refreshToken);
 
-      return tokens;
+      // Issue a fresh access token but keep the refresh token stable.
+      // Rotating it on every refresh made concurrent refreshes fatal:
+      // parallel 401s (page load, multiple tabs) raced, the first rotated
+      // the token, and every loser's session got wiped — the classic
+      // "refreshing the page logs me out" bug. The token stays valid
+      // until it expires (30d) or the user logs out.
+      const accessToken = jwt.sign(
+        { userId: payload.userId, jti: randomUUID() },
+        config.jwt.accessSecret,
+        { expiresIn: config.jwt.accessExpiry } as jwt.SignOptions
+      );
+
+      return { accessToken, refreshToken };
     } catch (error) {
-      refreshTokens.delete(refreshToken);
+      // Signature invalid or expired: this token is dead, remove it
+      db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
       throw new UnauthorizedError('Invalid refresh token');
     }
   }
 
   async logout(refreshToken: string): Promise<void> {
-    refreshTokens.delete(refreshToken);
+    getDb().prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
   }
 
   async verifyAccessToken(token: string): Promise<string> {
@@ -92,41 +107,25 @@ export class AuthService {
   }
 
   async getUserById(userId: string): Promise<User | null> {
-    const user = users.get(userId);
-    if (!user) return null;
-
-    const { password: _, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    const row = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId) as
+      | UserRow
+      | undefined;
+    return row ? toUser(row) : null;
   }
 
   private generateTokens(userId: string): AuthTokens {
-    const accessToken = jwt.sign(
-      { userId },
-      config.jwt.accessSecret,
-      { expiresIn: config.jwt.accessExpiry }
-    );
+    // jti makes every token unique. Without it, two logins inside the same
+    // second mint byte-identical JWTs (same payload + same iat second),
+    // which collides on the refresh_tokens primary key -> 500.
+    const accessToken = jwt.sign({ userId, jti: randomUUID() }, config.jwt.accessSecret, {
+      expiresIn: config.jwt.accessExpiry,
+    } as jwt.SignOptions);
 
-    const refreshToken = jwt.sign(
-      { userId },
-      config.jwt.refreshSecret,
-      { expiresIn: config.jwt.refreshExpiry }
-    );
+    const refreshToken = jwt.sign({ userId, jti: randomUUID() }, config.jwt.refreshSecret, {
+      expiresIn: config.jwt.refreshExpiry,
+    } as jwt.SignOptions);
 
     return { accessToken, refreshToken };
-  }
-
-  // Helper method to create a default admin user
-  async createDefaultAdmin(): Promise<void> {
-    const adminEmail = 'admin@mutelight.app';
-    const adminPassword = 'changeme123';
-
-    try {
-      await this.register(adminEmail, adminPassword);
-      logger.info(`Default admin user created: ${adminEmail}`);
-    } catch (error) {
-      // User might already exist
-      logger.debug('Default admin user already exists');
-    }
   }
 }
 

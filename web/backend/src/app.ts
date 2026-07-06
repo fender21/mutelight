@@ -10,9 +10,13 @@ import { logger } from './utils/logger';
 
 // Import routes
 import authRoutes from './routes/auth.routes';
-// import connectorRoutes from './routes/connector.routes';
-// import automationRoutes from './routes/automation.routes';
-// import deviceRoutes from './routes/device.routes';
+import pairRoutes from './routes/pair.routes';
+import beaconRoutes from './routes/beacon.routes';
+import keysRoutes from './routes/keys.routes';
+import devicesRoutes from './routes/devices.routes';
+import gatewaysRoutes from './routes/gateways.routes';
+import integrationsRoutes from './routes/integrations.routes';
+import hookRoutes from './routes/hook.routes';
 
 export function createApp() {
   const app = express();
@@ -62,9 +66,13 @@ export function createApp() {
 
   // API routes
   app.use('/api/auth', authRoutes);
-  // app.use('/api/connectors', connectorRoutes);
-  // app.use('/api/automations', automationRoutes);
-  // app.use('/api/devices', deviceRoutes);
+  app.use('/api/pair', pairRoutes);
+  app.use('/api/beacon', beaconRoutes);
+  app.use('/api/keys', keysRoutes);
+  app.use('/api/devices', devicesRoutes);
+  app.use('/api/gateways', gatewaysRoutes);
+  app.use('/api/integrations', integrationsRoutes);
+  app.use('/api/hook', hookRoutes);
 
   // Error handling
   app.use(notFoundHandler);

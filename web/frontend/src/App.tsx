@@ -1,4 +1,3 @@
-import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -6,6 +5,9 @@ import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
+import { Devices } from './pages/Devices';
+import { Integrations } from './pages/Integrations';
+import { Settings } from './pages/Settings';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,7 +26,7 @@ function App() {
           {/* Public routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
+
           {/* Protected routes */}
           <Route
             path="/"
@@ -36,11 +38,11 @@ function App() {
           >
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="connectors" element={<div className="p-8">Connectors page</div>} />
-            <Route path="automations" element={<div className="p-8">Automations page</div>} />
-            <Route path="settings" element={<div className="p-8">Settings page</div>} />
+            <Route path="devices" element={<Devices />} />
+            <Route path="integrations" element={<Integrations />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
-          
+
           {/* Catch all */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
