@@ -1,7 +1,21 @@
 import { spawn } from 'child_process';
+import { existsSync, statSync } from 'fs';
 import electron from 'electron';
 
-console.log('Starting MuteLight in development mode...\n');
+console.log('Starting MuteBeacon in development mode...\n');
+
+const startedAt = Date.now();
+
+// True once the watch build has written a FRESH bundle (mtime after we
+// started) — launching Electron against a stale bundle causes the renderer
+// and preload APIs to disagree.
+function freshlyBuilt(file) {
+  try {
+    return existsSync(file) && statSync(file).mtimeMs >= startedAt;
+  } catch {
+    return false;
+  }
+}
 
 // Start Vite dev server for renderer
 console.log('[Renderer] Starting Vite dev server...');
@@ -26,9 +40,14 @@ setTimeout(() => {
     { shell: true, stdio: 'inherit' }
   );
 
-  // Start Electron after initial build
-  setTimeout(() => {
-    console.log('[Electron] Starting Electron app...\n');
+  // Start Electron only after BOTH watch builds have emitted fresh bundles
+  const waitForBuilds = setInterval(() => {
+    if (!freshlyBuilt('dist-main/index.js') || !freshlyBuilt('dist-preload/preload.js')) {
+      return;
+    }
+    clearInterval(waitForBuilds);
+
+    console.log('[Electron] Fresh builds detected, starting Electron app...\n');
     const electronProcess = spawn(electron, ['.'], {
       shell: true,
       stdio: 'inherit',
@@ -42,7 +61,7 @@ setTimeout(() => {
       preloadProcess.kill();
       process.exit(0);
     });
-  }, 3000);
+  }, 500);
 }, 2000);
 
 process.on('SIGINT', () => {
