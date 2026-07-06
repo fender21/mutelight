@@ -6,8 +6,14 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /**
+   * False until the first checkAuth() has settled. Route guards MUST wait
+   * for this — redirecting while it's false is the "logged out on every
+   * refresh" bug (the guard's first render happens before checkAuth runs).
+   */
+  isInitialized: boolean;
   error: string | null;
-  
+
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -19,6 +25,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
   isLoading: false,
+  isInitialized: false,
   error: null,
 
   login: async (email: string, password: string) => {
@@ -94,9 +101,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   checkAuth: async () => {
-    const accessToken = localStorage.getItem('accessToken');
-    if (!accessToken) {
-      set({ isAuthenticated: false, isLoading: false });
+    // A refresh token is enough to restore the session (the interceptor
+    // mints a fresh access token on the first 401)
+    const hasTokens =
+      localStorage.getItem('accessToken') || localStorage.getItem('refreshToken');
+    if (!hasTokens) {
+      set({ isAuthenticated: false, isLoading: false, isInitialized: true });
       return;
     }
 
@@ -108,12 +118,13 @@ export const useAuthStore = create<AuthState>((set) => ({
           user: response.data.user,
           isAuthenticated: true,
           isLoading: false,
+          isInitialized: true,
         });
       } else {
-        set({ isAuthenticated: false, isLoading: false });
+        set({ isAuthenticated: false, isLoading: false, isInitialized: true });
       }
     } catch (error) {
-      set({ isAuthenticated: false, isLoading: false });
+      set({ isAuthenticated: false, isLoading: false, isInitialized: true });
     }
   },
 

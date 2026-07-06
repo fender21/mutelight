@@ -392,20 +392,27 @@ function RuleEditor({
   };
 
   const handleSave = async () => {
-    for (const row of rows) {
+    // Rows that were added but never touched shouldn't block saving —
+    // silently drop them. Only a PARTIALLY filled row is a real mistake.
+    const meaningful = rows.filter(
+      (row) => row.event.trim() !== '' || (row.stateSel === CUSTOM_STATE && row.customState.trim() !== '')
+    );
+
+    for (let i = 0; i < meaningful.length; i++) {
+      const row = meaningful[i];
       if (!row.event.trim()) {
-        onError('Every rule needs an event pattern.');
+        onError(`Rule ${i + 1} needs an event pattern (the name your provider sends, e.g. "${provider.eventExamples[0] ?? 'my-event'}").`);
         return;
       }
       if (!rowState(row)) {
-        onError('Every rule needs a state (pick one or enter a custom state).');
+        onError(`Rule ${i + 1} ("${row.event.trim()}") needs a state — pick one from the list or type a custom state name.`);
         return;
       }
     }
     setSaving(true);
     try {
       const updated = await integrationsApi.update(instance.id, {
-        rules: rows.map(fromRuleRow),
+        rules: meaningful.map(fromRuleRow),
       });
       onSaved(updated);
       setRows(updated.rules.map(toRuleRow));
