@@ -9,6 +9,10 @@ import { EventEmitter } from 'events';
 // Redirect URI for OAuth - must be configured in Discord Developer Portal
 const OAUTH_REDIRECT_URI = 'http://127.0.0.1';
 
+// How long to wait for the user to respond to Discord's consent dialog
+// before giving up and treating it as a failed connection attempt.
+const AUTHORIZE_TIMEOUT_MS = 60000;
+
 class DiscordService extends EventEmitter {
   private client: DiscordRPCClient;
   private connected = false;
@@ -399,15 +403,23 @@ class DiscordService extends EventEmitter {
 
         // Step 2: Send AUTHORIZE request (RPC flow - no redirect_uri here)
         // Note: redirect_uri is NOT sent in RPC AUTHORIZE, but IS needed for token exchange
+        // This resolves only once the user responds to Discord's consent dialog
+        // (or Discord silently skips it, if already approved). If Discord isn't
+        // running, or the dialog is missed, this would otherwise hang forever
+        // with zero feedback — so it's bounded with an explicit timeout.
         const scopes = [OAuth2Scopes.RPC, OAuth2Scopes.RPCVoiceRead];
-        const authorizeResponse = await this.client.request('AUTHORIZE', {
-          scopes,
-          client_id: DISCORD_CLIENT_ID,
-          // 'consent' forces Discord to show the authorize dialog on every
-          // single attempt, including automatic reconnects. Omitting it lets
-          // Discord skip the prompt once the user has already approved this
-          // app, so retries (e.g. after a transient IPC hiccup) don't nag.
-        });
+        const authorizeResponse = await this.withTimeout(
+          this.client.request('AUTHORIZE', {
+            scopes,
+            client_id: DISCORD_CLIENT_ID,
+            // 'consent' forces Discord to show the authorize dialog on every
+            // single attempt, including automatic reconnects. Omitting it lets
+            // Discord skip the prompt once the user has already approved this
+            // app, so retries (e.g. after a transient IPC hiccup) don't nag.
+          }),
+          AUTHORIZE_TIMEOUT_MS,
+          'Discord did not respond to the authorization request (is Discord running? check for a permission popup)'
+        );
 
         const code = authorizeResponse?.data?.code;
         if (!code) {
@@ -484,6 +496,27 @@ class DiscordService extends EventEmitter {
       this.scheduleReconnect();
       return false;
     }
+  }
+
+  /**
+   * Race a promise against a timeout, rejecting with a clear message if
+   * it doesn't settle in time (used for RPC calls that wait on the user
+   * interacting with a Discord-native dialog, which may never appear).
+   */
+  private withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
   }
 
   /**
