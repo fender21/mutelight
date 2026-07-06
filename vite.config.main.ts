@@ -22,6 +22,7 @@ export default defineConfig({
         '@xhayper/discord-rpc',
         'winston',
         'ws',
+        'dotenv',
         ...require('module').builtinModules,
       ],
     },

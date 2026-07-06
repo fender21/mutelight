@@ -1,3 +1,6 @@
+// Must run before any other import — services read DISCORD_CLIENT_SECRET
+// from process.env at module-load time (see src/shared/constants.ts).
+import 'dotenv/config';
 import { app, BrowserWindow, shell } from 'electron';
 import path from 'path';
 import { configService } from './services/config.service';

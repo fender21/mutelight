@@ -3,9 +3,11 @@ import type { AppSettings } from './types';
 // Discord Application credentials
 // Get these from https://discord.com/developers/applications
 export const DISCORD_CLIENT_ID = '1439804981132660797';
-// IMPORTANT: You must add the client secret from your Discord application
-// Go to your app in Discord Developer Portal > OAuth2 > Client Secret
-export const DISCORD_CLIENT_SECRET = 'W7xc1bYos5c2ao9H2jhju02O4LdK72MS';
+// Client secret is loaded from a local .env file (gitignored), never
+// committed to source. Create a .env in the repo root with:
+//   DISCORD_CLIENT_SECRET=your_secret_here
+// Get it from: Discord Developer Portal > your app > OAuth2 > Client Secret
+export const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 
 // mDNS discovery constants
 export const MDNS_SERVICE_TYPE = '_wled._tcp.local';
