@@ -1,7 +1,7 @@
-import type { VoiceState, StateColors, StateLightConfig, WledDevice, EffectConfig } from './types';
+import type { VoiceState, BeaconState, KnownBeaconState, StateColors, StateLightConfig, WledDevice, EffectConfig } from './types';
 
-// Default state light configurations
-export const DEFAULT_STATE_COLORS: StateColors = {
+// Default state light configurations (every known state has an entry)
+export const DEFAULT_STATE_COLORS: Record<KnownBeaconState, StateLightConfig> = {
   idle: {
     color: '#333333',  // Dim gray - not in voice channel
     brightness: 50,
@@ -29,6 +29,28 @@ export const DEFAULT_STATE_COLORS: StateColors = {
   },
   streaming: {
     color: '#a855f7',  // Purple - screen sharing
+    brightness: 255,
+    enabled: true,
+  },
+  off: {
+    color: '#000000',  // Lights out (manual override)
+    brightness: 0,
+    enabled: true,
+  },
+  'claude-working': {
+    color: '#a855f7',  // Soft purple - Claude is working
+    brightness: 120,
+    enabled: true,
+    effect: { effectId: 2, speed: 100, intensity: 128 }, // Breathe
+  },
+  'claude-attention': {
+    color: '#a855f7',  // Bright purple - Claude needs input
+    brightness: 255,
+    enabled: true,
+    effect: { effectId: 1, speed: 160, intensity: 128 }, // Blink
+  },
+  'claude-done': {
+    color: '#22c55e',  // Green flash - Claude finished
     brightness: 255,
     enabled: true,
   },
@@ -70,15 +92,16 @@ export function calculateEffectiveState(discordState: {
  * Resolution order: device config > legacy colors > defaults
  */
 export function getStateLightConfig(
-  state: VoiceState,
+  state: BeaconState,
   device: WledDevice
 ): StateLightConfig {
-  // Check device-level state colors
-  if (device.stateColors?.[state]) {
-    return device.stateColors[state];
+  // Check device-level state colors (synced from the cloud, or local legacy)
+  const deviceConfig = device.stateColors?.[state];
+  if (deviceConfig) {
+    return deviceConfig;
   }
 
-  // Fallback to legacy colors for muted/unmuted states
+  // Fallback to legacy colors for muted/unmuted voice states
   if (state === 'muted' || state === 'deafened') {
     return {
       color: device.muted_color,
@@ -95,11 +118,17 @@ export function getStateLightConfig(
     };
   }
 
-  // Use defaults for other states
-  return {
-    ...DEFAULT_STATE_COLORS[state],
-    brightness: device.defaultBrightness ?? DEFAULT_STATE_COLORS[state].brightness,
-  };
+  // Built-in defaults for known states
+  const defaultConfig = (DEFAULT_STATE_COLORS as StateColors)[state];
+  if (defaultConfig) {
+    return {
+      ...defaultConfig,
+      brightness: device.defaultBrightness ?? defaultConfig.brightness,
+    };
+  }
+
+  // Unknown state with no configured color: leave the lights alone
+  return { color: '#000000', brightness: 0, enabled: false };
 }
 
 /**

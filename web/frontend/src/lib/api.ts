@@ -1,7 +1,9 @@
 import axios from 'axios';
 import type { ApiResponse, AuthTokens, User } from '../../../shared/types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+// Relative by default so the Vite dev proxy handles it; set VITE_API_URL
+// (e.g. http://localhost:3001/api) to talk to the backend directly.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3002';
 
 // Create axios instance
@@ -110,11 +112,19 @@ export const authApi = {
 // WebSocket client
 export class WebSocketClient {
   private ws: WebSocket | null = null;
-  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private listeners: Map<string, Set<Function>> = new Map();
+  private intentionalClose = false;
 
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) return;
+    if (
+      this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
+    }
+
+    this.intentionalClose = false;
 
     this.ws = new WebSocket(WS_URL);
 
@@ -134,7 +144,9 @@ export class WebSocketClient {
 
     this.ws.onclose = () => {
       console.log('WebSocket disconnected');
-      this.scheduleReconnect();
+      if (!this.intentionalClose) {
+        this.scheduleReconnect();
+      }
     };
 
     this.ws.onerror = (error) => {
@@ -145,7 +157,8 @@ export class WebSocketClient {
   private authenticate() {
     const { accessToken } = getTokens();
     if (accessToken && this.ws?.readyState === WebSocket.OPEN) {
-      this.send('auth', { token: accessToken });
+      // The server expects the token at the top level: { type: 'auth', token }
+      this.ws.send(JSON.stringify({ type: 'auth', token: accessToken }));
     }
   }
 
@@ -176,6 +189,7 @@ export class WebSocketClient {
   }
 
   disconnect() {
+    this.intentionalClose = true;
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     this.ws?.close();
   }

@@ -1,158 +1,15 @@
 import { ipcMain, BrowserWindow, app } from 'electron';
 import { configService } from '../services/config.service';
-import { discoveryService } from '../services/discovery.service';
 import { wledService } from '../services/wled.service';
 import { discordService } from '../services/discord.service';
 import { trayService } from '../services/tray.service';
+import { stateManager, StateChangeMeta } from '../services/state-manager.service';
+import { bridgeService } from '../services/bridge.service';
 import { logger } from '../utils/logger';
-import type { VoiceState, DiscordState, EffectConfig } from '@shared/types';
+import type { VoiceState, BeaconState } from '@shared/types';
 
 export function registerIpcHandlers(mainWindow: BrowserWindow): void {
-  // Device CRUD handlers
-  ipcMain.handle('devices:create', async (_event, deviceData) => {
-    try {
-      const device = configService.createDevice(deviceData);
-      logger.info('Device created:', device.id);
-      return { success: true, device };
-    } catch (error: any) {
-      logger.error('Failed to create device:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('devices:update', async (_event, id, updates) => {
-    try {
-      const device = configService.updateDevice(id, updates);
-      if (!device) {
-        return { success: false, error: 'Device not found' };
-      }
-      logger.info('Device updated:', id);
-      return { success: true, device };
-    } catch (error: any) {
-      logger.error('Failed to update device:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('devices:delete', async (_event, id) => {
-    try {
-      const success = configService.deleteDevice(id);
-      if (!success) {
-        return { success: false, error: 'Device not found' };
-      }
-      logger.info('Device deleted:', id);
-      return { success: true };
-    } catch (error: any) {
-      logger.error('Failed to delete device:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Discovery handler
-  ipcMain.handle('devices:discover', async () => {
-    try {
-      logger.info('Starting WLED device discovery...');
-      const devices = await discoveryService.scan();
-      logger.info(`Discovery complete: ${devices.length} devices found`);
-      return { success: true, devices };
-    } catch (error: any) {
-      logger.error('Discovery failed:', error);
-      return { success: false, error: error.message, devices: [] };
-    }
-  });
-
-  // Test connection handler
-  ipcMain.handle('devices:test-connection', async (_event, ipAddress) => {
-    try {
-      const online = await wledService.checkDeviceOnline(ipAddress);
-      return { success: true, online };
-    } catch (error: any) {
-      logger.error('Connection test failed:', error);
-      return { success: false, error: error.message, online: false };
-    }
-  });
-
-  // Preview device color handler (with optional effect)
-  ipcMain.handle('devices:preview-color', async (_event, deviceId: string, color: string, brightness: number, effect?: EffectConfig) => {
-    try {
-      const device = configService.getDevices().find(d => d.id === deviceId);
-      if (!device) {
-        return { success: false, error: 'Device not found' };
-      }
-      const result = await wledService.setDeviceColor(device.ip_address, color, brightness, 0, effect);
-      return { success: result };
-    } catch (error: any) {
-      logger.error('Preview color failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Restore device to current Discord state handler
-  ipcMain.handle('devices:restore-state', async (_event, deviceId: string) => {
-    try {
-      const device = configService.getDevices().find(d => d.id === deviceId);
-      if (!device) {
-        return { success: false, error: 'Device not found' };
-      }
-      const effectiveState = discordService.getEffectiveState();
-      await wledService.restoreDeviceFromState(effectiveState, device);
-      return { success: true };
-    } catch (error: any) {
-      logger.error('Restore state failed:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Get effects list from device
-  ipcMain.handle('devices:get-effects', async (_event, deviceId: string) => {
-    try {
-      const device = configService.getDevices().find(d => d.id === deviceId);
-      if (!device) {
-        return { success: false, error: 'Device not found', effects: [] };
-      }
-      const info = await wledService.getDeviceInfo(device.ip_address);
-      if (!info) {
-        return { success: false, error: 'Failed to fetch device info', effects: [] };
-      }
-      return { success: true, effects: info.effects };
-    } catch (error: any) {
-      logger.error('Failed to get effects:', error);
-      return { success: false, error: error.message, effects: [] };
-    }
-  });
-
-  // Capture current device state (for restore on app close)
-  ipcMain.handle('devices:capture-state', async (_event, deviceId: string) => {
-    try {
-      const device = configService.getDevices().find(d => d.id === deviceId);
-      if (!device) {
-        return { success: false, error: 'Device not found' };
-      }
-      const state = await wledService.captureDeviceState(deviceId, device.ip_address);
-      return { success: !!state, state };
-    } catch (error: any) {
-      logger.error('Failed to capture state:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Restore device to original captured state
-  ipcMain.handle('devices:restore-original', async (_event, deviceId: string) => {
-    try {
-      const restored = await wledService.restoreToOriginalState(deviceId);
-      return { success: restored };
-    } catch (error: any) {
-      logger.error('Failed to restore original state:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Get devices
-  ipcMain.handle('config:get-devices', async () => {
-    return configService.getDevices();
-  });
-
-  // Settings management
+  // Settings management (device management lives in the cloud dashboard)
   ipcMain.handle('settings:get', async () => {
     return configService.getSettings();
   });
@@ -185,17 +42,37 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
     return discordService.getState();
   });
 
+  // Beacon state (effective state across all sources)
+  ipcMain.handle('beacon:get-state', async () => {
+    return {
+      state: stateManager.getEffectiveState(),
+      source: stateManager.getWinningSource(),
+    };
+  });
+
+  // Manual override (tray/renderer): state null resumes automatic
+  ipcMain.handle('beacon:set-manual-state', async (_event, state: BeaconState | null) => {
+    stateManager.setSourceState('manual', state);
+    return { success: true };
+  });
+
+  // Bridge (cloud connection) management
+  ipcMain.handle('bridge:get-status', async () => {
+    return bridgeService.getStatus();
+  });
+
+  ipcMain.handle('bridge:start-pairing', async () => {
+    return bridgeService.startPairing();
+  });
+
+  ipcMain.handle('bridge:unpair', async () => {
+    await bridgeService.unpair();
+    return { success: true };
+  });
+
   // Window controls
   ipcMain.on('window:minimize', () => {
     mainWindow.minimize();
-  });
-
-  ipcMain.on('window:maximize', () => {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
-    }
   });
 
   ipcMain.on('window:close', () => {
@@ -211,32 +88,26 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
 }
 
 /**
- * Setup Discord event forwarding to renderer
+ * Wire the single state fan-out plus each event source into the StateManager.
+ * The StateManager is the only thing that drives WLED/tray/renderer; sources
+ * (Discord RPC, cloud bridge, tray manual overrides) just feed it.
  */
-export function setupDiscordForwarding(mainWindow: BrowserWindow): void {
-  // New stateChanged event - primary method for state handling
-  discordService.on('stateChanged', (effectiveState: VoiceState, fullState: DiscordState) => {
-    logger.info(`Discord state changed: ${effectiveState}`);
+export function setupStateForwarding(mainWindow: BrowserWindow): void {
+  // The one fan-out: effective beacon state -> lights + tray + renderer
+  stateManager.on('stateChanged', (effectiveState: BeaconState, meta: StateChangeMeta) => {
+    logger.info(`Beacon state changed: ${effectiveState} (source: ${meta.source ?? 'none'})`);
 
-    // Update WLED devices with new effective state
     const devices = configService.getDevices();
     wledService.updateAllDevices(effectiveState, devices);
 
-    // Update tray with current voice state (icon color + tooltip)
     trayService.updateVoiceState(effectiveState);
 
-    // Notify renderer with full state info
-    mainWindow.webContents.send('discord:state-changed', effectiveState, fullState);
-
-    // Also send legacy event for backward compatibility
-    const isMuted = effectiveState === 'muted' || effectiveState === 'deafened';
-    mainWindow.webContents.send('discord:mute-state-changed', isMuted);
+    mainWindow.webContents.send('beacon:state-changed', effectiveState, meta);
   });
 
-  // Legacy muteStateChanged event (still emitted for backward compatibility)
-  discordService.on('muteStateChanged', (isMuted: boolean) => {
-    logger.debug(`Legacy mute state changed: ${isMuted}`);
-    // Note: WLED updates are now handled by stateChanged event
+  // Source: Discord RPC (the one integration that must live locally)
+  discordService.on('stateChanged', (effectiveState: VoiceState) => {
+    stateManager.setSourceState('discord', effectiveState);
   });
 
   discordService.on('connected', () => {
@@ -245,7 +116,21 @@ export function setupDiscordForwarding(mainWindow: BrowserWindow): void {
   });
 
   discordService.on('disconnected', () => {
+    stateManager.clearSource('discord');
     trayService.updateDiscordState(false);
     mainWindow.webContents.send('discord:connection-changed', false);
+  });
+
+  // Source: cloud bridge — forward its lifecycle to the renderer
+  bridgeService.on('connectionChanged', (connected: boolean) => {
+    mainWindow.webContents.send('bridge:connection-changed', connected);
+  });
+
+  bridgeService.on('pairingCode', (code: string) => {
+    mainWindow.webContents.send('bridge:pairing-code', code);
+  });
+
+  bridgeService.on('paired', () => {
+    mainWindow.webContents.send('bridge:paired');
   });
 }

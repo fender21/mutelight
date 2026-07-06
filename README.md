@@ -1,192 +1,110 @@
-# MuteLight Desktop App
+# MuteBeacon
 
-Discord mute status LED controller for WLED devices.
+Turn your WLED LED strips into a status beacon. Discord mute state, Claude Code activity, CI results, anything — one light, one glance.
 
-## Features
+MuteBeacon has two parts:
 
-- 🔑 **License Key Validation** - Secure authentication via Supabase
-- 🎮 **Discord Integration** - Automatic mute detection via Discord RPC
-- 💡 **WLED Control** - Real-time LED color changes based on mute status
-- 🌈 **Zone Support** - Control individual LED segments
-- ⚙️ **Settings** - Auto-start, minimize to tray, polling interval
-- 🖥️ **Cross-Platform** - Windows, macOS, and Linux support
+- **Desktop gateway** (this repo root) — a tiny Electron tray app. It keeps an outbound connection to the MuteBeacon cloud, discovers WLED devices on your LAN, and drives them. Discord RPC runs here too (it's the one integration that must live on your machine).
+- **Cloud** (`web/`) — the API + dashboard. All configuration happens here: devices, colors, API keys, integrations. Anything can trigger your lights with one HTTP call.
 
-## Prerequisites
+## How it fits together
 
-Before running the app, you need to create a Discord Application to get a Client ID:
+```
+Claude Code hooks ─┐
+CI / webhooks ─────┼─▶ POST /api/beacon ─▶ cloud ─▶ WSS ─▶ gateway ─▶ WLED devices
+phone shortcuts ───┘                                          ▲
+                                            Discord RPC ──────┘ (local only)
+```
 
-1. Go to https://discord.com/developers/applications
-2. Create a new application called "MuteLight"
-3. Copy the Application ID (Client ID)
-4. Update `DISCORD_CLIENT_ID` in `src/shared/constants.ts`
+The gateway holds a `StateManager` that resolves one effective state from all
+sources by priority: **manual (tray) > cloud beacons > Discord**. Transient
+states (e.g. a green "Claude finished" flash) carry a TTL and automatically
+fall back to whatever is underneath.
 
-## Installation
+## Quick start (development)
 
 ```bash
-# Install dependencies
-npm install
+# 1. Cloud API + WebSocket (port 3001 / 3002)
+cd web/backend && npm install && npm run dev
 
-# Run in development mode
-npm run dev
+# 2. Dashboard (port 5174)
+cd web/frontend && npm install && npm run dev
 
-# Build for production
-npm run build
-
-# Package for distribution
-npm run package
+# 3. Desktop gateway
+npm install && npm run dev
 ```
 
-## Development
+## Onboarding flow (what a user does)
 
-The project uses:
+1. Install and launch the desktop app — it shows a **6-character pairing code**.
+2. Sign in to the dashboard, type in the code. Done — the computer is linked.
+3. WLED devices on your network **appear automatically** in the dashboard
+   (the gateway streams mDNS discovery results up). Click **Add**, hit
+   **Test flash** to confirm which strip it is, tweak per-state colors if
+   you want.
+4. Optional: on the **Integrations** page, create an API key and copy the
+   generated Claude Code hooks snippet into `~/.claude/settings.json`.
 
-- **Electron** - Desktop app framework
-- **React** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool (fast!)
-- **Tailwind CSS** - Styling
-- **Zustand** - State management
-- **@xhayper/discord-rpc** - Discord integration
-- **@supabase/supabase-js** - Backend communication
+There is no device management in the desktop app — the dashboard is the
+single management surface. The gateway caches config locally, so
+Discord → lights keeps working when your internet is down (cloud triggers
+obviously don't).
 
-### Project Structure
-
-```
-mutelight/
-├── src/
-│   ├── main/           # Electron main process (Node.js)
-│   ├── renderer/       # React UI (Browser)
-│   └── shared/         # Shared types and constants
-├── assets/             # App icons
-└── scripts/            # Development scripts
-```
-
-### Development Commands
+## Triggering the beacon
 
 ```bash
-# Start development server
-npm run dev
+curl -X POST https://<your-server>/api/beacon \
+  -H "Authorization: Bearer mb_your_api_key" \
+  -H "Content-Type: application/json" \
+  -d '{"state": "claude-attention", "source": "claude"}'
+```
 
-# Build main process
-npm run build:main
+- `state`: any string. Known states have default colors (`muted`, `connected`,
+  `deafened`, `streaming`, `speaking`, `idle`, `off`, `claude-working`,
+  `claude-attention`, `claude-done`); unknown states use the per-device colors
+  you configure in the dashboard.
+- `ttlMs` (optional): auto-clear after this many ms (e.g. a 4-second flash).
+- `state: "clear"`: release the trigger and fall back to Discord/manual.
 
-# Build preload script
-npm run build:preload
+## Tray menu
 
-# Build renderer
-npm run build:renderer
+Right-click the tray icon for manual overrides: **Set Muted / Set Unmuted /
+Lights Off / Resume Automatic**. Manual overrides beat everything else.
 
-# Build all
-npm run build
+## Development commands
 
-# Create distributable
-npm run package
+```bash
+npm run dev          # gateway with hot reload
+npm run build        # build main + preload + renderer
+npm run package      # electron-builder distributables
+npm run type-check   # tsc over the whole client
 
-# Type check
-npm run type-check
+cd web/backend && npm run dev    # API (3001) + WS (3002), SQLite in ./data
+cd web/frontend && npm run dev   # dashboard on 5174
 ```
 
 ## Configuration
 
-### Backend (Supabase)
+Gateway settings live in electron-store (`%APPDATA%/mutelight`). The bridge
+endpoints default to `localhost` and can be changed in settings storage:
+`bridge.serverUrl` (WS), `bridge.apiUrl` (REST), `bridge.dashboardUrl`.
 
-The app connects to a Supabase backend with the following tables:
-
-- `profiles` - User license keys
-- `wled_devices` - WLED device configurations
-- `light_zones` - LED zone definitions
-
-Credentials are in `src/shared/constants.ts`.
-
-### WLED Devices
-
-Configure your WLED devices in the web dashboard, then sync them in the desktop app.
-
-Each device needs:
-- Name
-- IP address (local network)
-- Muted color (hex)
-- Unmuted color (hex)
-
-Optional zones allow controlling specific LED segments.
-
-## Usage
-
-1. **Launch the app** - Run `npm run dev` or the built executable
-2. **Enter license key** - 32-character key from your account
-3. **Sync settings** - Click "Sync Settings" to load your devices
-4. **Join Discord voice** - The app will automatically detect mute changes
-5. **Watch your LEDs** - They'll change color when you mute/unmute!
-
-## Building for Distribution
-
-### Windows
-
-```bash
-npm run package
-# Output: release/MuteLight-1.0.0-x64-win.exe
-```
-
-Creates both NSIS installer and portable executable.
-
-### macOS
-
-```bash
-npm run package
-# Output: release/MuteLight-1.0.0.dmg
-```
-
-### Linux
-
-```bash
-npm run package
-# Output: release/MuteLight-1.0.0.AppImage
-```
+Server env (`web/backend/.env`): `PORT` (3001), `WS_PORT` (3002),
+`DATABASE_PATH` (SQLite file), `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET`
+(required in production), `CORS_ORIGIN`.
 
 ## Troubleshooting
 
-### Discord not connecting
-
-- Make sure Discord is running
-- Check that you've set the correct `DISCORD_CLIENT_ID`
-- Discord RPC only works with the desktop Discord client (not browser)
-
-### WLED devices offline
-
-- Verify devices are on the same network
-- Check IP addresses in your device configuration
-- Test connectivity: Open `http://<device-ip>` in a browser
-
-### License validation fails
-
-- Check your internet connection
-- Verify the license key is correct (32 characters)
-- Ensure purchase is complete in web dashboard
-
-## Security
-
-The app follows Electron security best practices:
-
-- ✅ Context isolation enabled
-- ✅ Node integration disabled in renderer
-- ✅ Preload script with contextBridge
-- ✅ External links open in browser
-- ✅ Input validation on all IPC messages
+- **Pairing code won't appear** — the gateway can't reach the API server;
+  check `bridge.apiUrl` and that the backend is running.
+- **Discord not connecting** — Discord desktop app must be running (RPC
+  doesn't work with the browser client). Lights still work via cloud
+  triggers and the tray menu.
+- **WLED device offline** — confirm it's on the same subnet and
+  `http://<device-ip>` loads in a browser.
 
 ## Logs
 
-Application logs are stored in:
-
-- **Windows**: `%APPDATA%\mutelight\logs\`
-- **macOS**: `~/Library/Logs/mutelight/`
-- **Linux**: `~/.config/mutelight/logs/`
-
-## License
-
-Copyright © 2025 MuteLight
-
-## Support
-
-For issues or questions:
-- Web: https://mutelight.app
-- Email: support@mutelight.app
+- Gateway: `%APPDATA%\mutelight\logs\` (Windows), `~/Library/Logs/mutelight/`
+  (macOS), `~/.config/mutelight/logs/` (Linux)
+- Server: console in dev, `logs/` in production

@@ -1,5 +1,5 @@
 import { WLED_TIMEOUT, WLED_RETRY_ATTEMPTS, WLED_RETRY_DELAY } from '@shared/constants';
-import type { WledDevice, VoiceState, EffectConfig, WledEffect, CapturedWledState } from '@shared/types';
+import type { WledDevice, VoiceState, BeaconState, EffectConfig, WledEffect, CapturedWledState } from '@shared/types';
 import { getStateLightConfig, getTransitionTime, DEFAULT_BRIGHTNESS, DEFAULT_EFFECT_CONFIG } from '@shared/defaults';
 import { logger } from '../utils/logger';
 
@@ -83,7 +83,8 @@ class WledService {
     const rgb = this.hexToRgb(hexColor);
     const effectConfig = effect ?? DEFAULT_EFFECT_CONFIG;
     const payload: WledStatePayload = {
-      on: true,
+      // Brightness 0 means "lights out" — WLED treats bri:0 as on, so switch off
+      on: brightness > 0,
       bri: Math.max(0, Math.min(255, brightness)),
       seg: [{
         col: [rgb],
@@ -107,7 +108,7 @@ class WledService {
    * Uses new multi-state configuration with fallback to legacy colors
    */
   async updateAllDevices(
-    effectiveState: VoiceState,
+    effectiveState: BeaconState,
     devices: WledDevice[]
   ): Promise<void> {
     logger.info(`Updating all devices - State: ${effectiveState}`);
@@ -162,7 +163,7 @@ class WledService {
    * Restore device to current Discord state
    */
   async restoreDeviceFromState(
-    effectiveState: VoiceState,
+    effectiveState: BeaconState,
     device: WledDevice
   ): Promise<void> {
     logger.info(`Restoring device ${device.name} to state: ${effectiveState}`);
@@ -231,7 +232,7 @@ class WledService {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as { effects?: string[]; state?: any };
 
       // Parse effects array - WLED returns array of effect names indexed by ID
       const effectNames: string[] = data.effects || [];

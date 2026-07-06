@@ -21,6 +21,7 @@ export default defineConfig({
         'electron-store',
         '@xhayper/discord-rpc',
         'winston',
+        'ws',
         ...require('module').builtinModules,
       ],
     },

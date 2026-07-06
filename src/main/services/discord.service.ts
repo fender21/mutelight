@@ -432,7 +432,7 @@ class DiscordService extends EventEmitter {
           throw new Error(`Token exchange failed: ${tokenResponse.status} ${errorText}`);
         }
 
-        const tokenData = await tokenResponse.json();
+        const tokenData = (await tokenResponse.json()) as { access_token: string };
         logger.info('Token exchange successful');
 
         // Step 4: Authenticate with the access token

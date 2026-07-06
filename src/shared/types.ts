@@ -1,5 +1,12 @@
+import type { BeaconState } from './protocol';
+
+export type { BeaconState, KnownBeaconState, ManagedDevice, DiscoveredDevice, BeaconEventPayload } from './protocol';
+
 // Voice state enum (priority order - highest priority wins)
 export type VoiceState = 'idle' | 'connected' | 'speaking' | 'muted' | 'deafened' | 'streaming';
+
+// Where a beacon state can originate. Priority: manual > bridge > discord.
+export type BeaconSource = 'discord' | 'bridge' | 'manual';
 
 // WLED effect from device
 export interface WledEffect {
@@ -30,15 +37,9 @@ export interface StateLightConfig {
   effect?: EffectConfig;  // Optional effect configuration
 }
 
-// All state configurations
-export interface StateColors {
-  idle: StateLightConfig;
-  connected: StateLightConfig;
-  speaking: StateLightConfig;
-  muted: StateLightConfig;
-  deafened: StateLightConfig;
-  streaming: StateLightConfig;
-}
+// All state configurations, keyed by BeaconState. Open-ended so cloud
+// integrations can define colors for states the client has never heard of.
+export type StateColors = Partial<Record<BeaconState, StateLightConfig>>;
 
 // Local data types
 export interface WledDevice {
@@ -70,11 +71,19 @@ export interface AppConfig {
   lastSync: number | null;
 }
 
+export interface BridgeSettings {
+  serverUrl: string; // WebSocket endpoint, e.g. ws://localhost:3002
+  apiUrl: string; // REST base for pairing, e.g. http://localhost:3001
+  dashboardUrl: string; // web dashboard, e.g. http://localhost:5173
+  deviceToken: string | null; // long-lived gateway credential (null = unpaired)
+}
+
 export interface AppSettings {
   autoStart: boolean;
   minimizeToTray: boolean;
   pollingInterval: number; // milliseconds
   theme: 'dark' | 'light'; // future-proofing
+  bridge: BridgeSettings;
 }
 
 export interface DiscordState {

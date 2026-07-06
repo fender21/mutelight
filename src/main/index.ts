@@ -4,17 +4,19 @@ import { configService } from './services/config.service';
 import { discordService } from './services/discord.service';
 import { wledService } from './services/wled.service';
 import { trayService } from './services/tray.service';
-import { registerIpcHandlers, setupDiscordForwarding } from './ipc/handlers';
+import { bridgeService } from './services/bridge.service';
+import { registerIpcHandlers, setupStateForwarding } from './ipc/handlers';
 import { logger } from './utils/logger';
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 800,
-    minHeight: 600,
+    width: 460,
+    height: 640,
+    minWidth: 400,
+    minHeight: 560,
+    maxWidth: 600,
     backgroundColor: '#0a0a0a',
     show: false,
     autoHideMenuBar: true,
@@ -61,7 +63,7 @@ function createWindow(): void {
 
   // Register IPC handlers
   registerIpcHandlers(mainWindow);
-  setupDiscordForwarding(mainWindow);
+  setupStateForwarding(mainWindow);
 
   // Initialize system tray
   trayService.init(mainWindow);
@@ -85,6 +87,9 @@ app.whenReady().then(async () => {
 
   // Create main window
   createWindow();
+
+  // Start the cloud bridge (pairs first if no device token yet)
+  bridgeService.start();
 
   // Start Discord RPC connection
   const connected = await discordService.connect();
@@ -132,6 +137,7 @@ app.on('before-quit', async () => {
     }
   }
 
+  bridgeService.stop();
   discordService.disconnect();
   trayService.destroy();
 });

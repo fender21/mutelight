@@ -13,7 +13,7 @@ export const config = {
   },
   
   database: {
-    url: process.env.DATABASE_URL || 'postgresql://localhost:5432/mutelight',
+    path: process.env.DATABASE_PATH || './data/mutebeacon.db',
   },
   
   jwt: {
@@ -47,7 +47,6 @@ export function validateConfig(): void {
   const required = [
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
-    'DATABASE_URL',
   ];
   
   if (config.isProduction) {
