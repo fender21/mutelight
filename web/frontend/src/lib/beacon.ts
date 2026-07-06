@@ -139,7 +139,20 @@ export const integrationsApi = {
   async remove(id: string): Promise<void> {
     await api.delete(`/integrations/${id}`);
   },
+
+  async test(id: string): Promise<IntegrationTestResult> {
+    const res = await api.post<ApiResponse<IntegrationTestResult>>(`/integrations/${id}/test`);
+    return res.data.data!;
+  },
 };
+
+export interface IntegrationTestResult {
+  fired: boolean;
+  event?: string;
+  state?: string;
+  delivered?: number;
+  reason?: string;
+}
 
 /**
  * Origin the API is reachable at, for URLs the user copies into external

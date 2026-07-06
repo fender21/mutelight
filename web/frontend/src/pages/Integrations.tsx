@@ -26,6 +26,7 @@ import {
   Trash2,
   Webhook,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   apiDisplayOrigin,
@@ -553,6 +554,32 @@ function InstanceDetail({
   const [nameDraft, setNameDraft] = useState(instance.name);
   const [advanced, setAdvanced] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await integrationsApi.test(instance.id);
+      if (!result.fired) {
+        setTestResult(result.reason ?? 'Nothing fired.');
+      } else if (!result.delivered) {
+        setTestResult(
+          `Fired "${result.event}" → ${result.state}, but no desktop client is online to receive it.`
+        );
+      } else {
+        setTestResult(
+          `Fired "${result.event}" → ${result.state} — delivered to ${result.delivered} computer${result.delivered === 1 ? '' : 's'}. Watch your lights!`
+        );
+      }
+      await onRefresh();
+    } catch (error) {
+      setTestResult(apiErrorMessage(error, 'Test failed'));
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const hookUrl = instance.hookPath ? hookDisplayUrl(instance.hookPath) : null;
   const isClaudeCode = provider.id === 'claude-code';
@@ -712,25 +739,45 @@ function InstanceDetail({
           />
         )}
 
-        {/* Delivery status */}
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background/50 px-3 py-2 text-xs text-muted-foreground">
-          {instance.lastEvent && instance.lastEventAt ? (
-            <span>
-              Last event: <code className="rounded bg-muted px-1 py-0.5">{instance.lastEvent}</code>{' '}
-              &middot; {relativeTime(instance.lastEventAt)} &middot; {instance.eventCount} total
+        {/* Delivery status + one-click test */}
+        <div className="space-y-2 rounded-md border border-border bg-background/50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {instance.lastEvent && instance.lastEventAt ? (
+              <span>
+                Last event:{' '}
+                <code className="rounded bg-muted px-1 py-0.5">{instance.lastEvent}</code>{' '}
+                &middot; {relativeTime(instance.lastEventAt)} &middot; {instance.eventCount} total
+              </span>
+            ) : (
+              <span>No events received yet &mdash; try the Test button.</span>
+            )}
+            <span className="ml-auto inline-flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing}
+                className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+                title="Fire a test event through this integration's rules"
+              >
+                <Zap className={`h-3 w-3 ${testing ? 'animate-pulse' : ''}`} />
+                {testing ? 'Testing…' : 'Test'}
+              </button>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                title="Refresh delivery status"
+              >
+                <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
             </span>
-          ) : (
-            <span>No events received yet &mdash; send a test from the provider.</span>
+          </div>
+          {testResult && (
+            <p className="text-xs text-foreground/90" role="status">
+              {testResult}
+            </p>
           )}
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            title="Refresh delivery status"
-          >
-            <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
         </div>
 
         {/* Triggers */}

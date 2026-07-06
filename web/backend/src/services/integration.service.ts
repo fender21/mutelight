@@ -149,6 +149,24 @@ class IntegrationService {
   }
 
   /**
+   * Fire a synthetic event through the instance's real rule pipeline so
+   * users can verify their setup with one click. Wildcard patterns are
+   * resolved to a representative concrete event. Tests ALWAYS carry a
+   * TTL so a test of a sticky state can't leave the lights stuck.
+   */
+  buildTestEvent(instance: IntegrationInstance): { event: string; rule: TriggerRule } | null {
+    const rule = instance.rules.find(r => r.enabled);
+    if (!rule) return null;
+    const event =
+      rule.event === '*'
+        ? 'test'
+        : rule.event.endsWith('.*')
+          ? `${rule.event.slice(0, -2)}.test`
+          : rule.event;
+    return { event, rule };
+  }
+
+  /**
    * First enabled rule whose pattern matches wins — predictable and easy
    * to reason about in the rule editor (order matters).
    */
