@@ -403,7 +403,10 @@ class DiscordService extends EventEmitter {
         const authorizeResponse = await this.client.request('AUTHORIZE', {
           scopes,
           client_id: DISCORD_CLIENT_ID,
-          prompt: 'consent',
+          // 'consent' forces Discord to show the authorize dialog on every
+          // single attempt, including automatic reconnects. Omitting it lets
+          // Discord skip the prompt once the user has already approved this
+          // app, so retries (e.g. after a transient IPC hiccup) don't nag.
         });
 
         const code = authorizeResponse?.data?.code;
@@ -429,7 +432,14 @@ class DiscordService extends EventEmitter {
 
         if (!tokenResponse.ok) {
           const errorText = await tokenResponse.text();
-          throw new Error(`Token exchange failed: ${tokenResponse.status} ${errorText}`);
+          const error = new Error(`Token exchange failed: ${tokenResponse.status} ${errorText}`);
+          // A rejected client id/secret pair will never succeed on retry —
+          // mark it so the caller stops looping (and re-prompting the user
+          // for Discord consent) instead of hammering a broken config.
+          if (/invalid_client|unauthorized_client/.test(errorText)) {
+            (error as any).fatal = true;
+          }
+          throw error;
         }
 
         const tokenData = (await tokenResponse.json()) as { access_token: string };
@@ -463,6 +473,14 @@ class DiscordService extends EventEmitter {
       return true;
     } catch (error: any) {
       logger.error('Failed to connect to Discord RPC:', error.message);
+      if (error.fatal) {
+        logger.error(
+          'Discord client secret was rejected (invalid_client). This will not resolve on ' +
+          'retry — get a fresh secret from the Discord Developer Portal (OAuth2 > Client ' +
+          'Secret) and update DISCORD_CLIENT_SECRET. Not scheduling further reconnect attempts.'
+        );
+        return false;
+      }
       this.scheduleReconnect();
       return false;
     }

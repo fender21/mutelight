@@ -8,7 +8,25 @@ import { bridgeService } from './services/bridge.service';
 import { registerIpcHandlers, setupStateForwarding } from './ipc/handlers';
 import { logger } from './utils/logger';
 
+// A second instance would independently pair/authenticate with Discord and
+// the cloud bridge, causing duplicate consent prompts and both instances
+// fighting over the same gateway connection. Refuse to run more than one.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow: BrowserWindow | null = null;
+
+app.on('second-instance', () => {
+  logger.info('Second instance launch detected, focusing existing window');
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
